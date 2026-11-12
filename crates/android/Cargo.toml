@@ -35,3 +35,5 @@ codegen-units = 1
 strip = true
 # Never "abort": a panic is caught at the JNI door (lib.rs `guard`) and returned as an error.
 panic = "unwind"
+
+rquickjs-sys = { version = "0.14.0", features = ["bindgen"] }

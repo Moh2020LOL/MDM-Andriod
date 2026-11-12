@@ -1,4 +1,4 @@
-name: Android APK
+﻿name: Android APK
 
 # Builds the Android app in the cloud: nothing to install on your computer.
 # Run it from the Actions tab (Run workflow); the APK is under the run's "Artifacts".
@@ -21,6 +21,9 @@ jobs:
         with:
           targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
 
+      - name: Install libclang
+        run: sudo apt-get update && sudo apt-get install -y libclang-dev
+
       - name: Install cargo-ndk
         run: cargo install cargo-ndk --locked
 
@@ -40,5 +43,6 @@ jobs:
         with:
           name: mister-download-manager-debug-apk
           path: android/app/build/outputs/apk/debug/*.apk
+
 
 
