@@ -14,7 +14,6 @@
 #![allow(unsafe_code)]
 
 mod http_dl;
-mod torrent;
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
@@ -81,13 +80,6 @@ fn dispatch(method: &str, args: &Value) -> Reply {
         "http_cancel" => http_dl::cancel(args),
         "http_limit" => http_dl::limit(args),
         "http_finish" => http_dl::finish(args),
-        "torrent_start" => torrent::start(args),
-        "torrent_add" => torrent::add(args),
-        "torrent_stats" => torrent::stats(args),
-        "torrent_pause" => torrent::pause(args),
-        "torrent_resume" => torrent::resume(args),
-        "torrent_remove" => torrent::remove(args),
-        "torrent_stop" => torrent::stop(),
         other => Err(format!("unknown method \"{other}\"")),
     }
 }
