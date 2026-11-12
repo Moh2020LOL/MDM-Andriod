@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Mister Download Manager</string>
+    <string name="channel_name">التنزيلات</string>
+    <string name="add_title">إضافة تنزيل</string>
+    <string name="add_hint">رابط أو رابط magnet</string>
+    <string name="add_video">هذه صفحة فيديو (يوتيوب وغيره)</string>
+    <string name="add_button">تنزيل</string>
+    <string name="cancel">إلغاء</string>
+    <string name="open_torrent">فتح ملف .torrent</string>
+    <string name="empty">لا توجد تنزيلات بعد. اضغط + والصق رابطًا.</string>
+    <string name="pause">إيقاف مؤقت</string>
+    <string name="resume">استئناف</string>
+    <string name="remove">إزالة</string>
+    <string name="remove_with_file">إزالة مع حذف الملف</string>
+    <string name="status_queued">في الانتظار…</string>
+    <string name="status_running">جارٍ التنزيل</string>
+    <string name="status_paused">متوقف مؤقتًا</string>
+    <string name="status_done">اكتمل</string>
+    <string name="status_failed">فشل</string>
+    <string name="of_size">%1$s من %2$s</string>
+    <string name="notification_summary">%1$d قيد التنزيل · %2$s/ث</string>
+    <string name="saved_in">المحفوظ في: %1$s</string>
+</resources>

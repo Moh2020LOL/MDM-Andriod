@@ -1,0 +1,37 @@
+[package]
+name = "mdm-android"
+description = "Mister Download Manager's Android library: the download engine and the torrent client behind one JNI call, for the Kotlin app in android/"
+version = "0.5.2"
+edition = "2024"
+rust-version = "1.98"
+license = "GPL-3.0-or-later"
+authors = ["Ahmed Nefzaoui"]
+publish = false
+
+[lib]
+name = "mdm_android"
+crate-type = ["cdylib"]
+
+[dependencies]
+# Without its default `browser-connection`: it builds BoringSSL (CMake, C++), which the phone's
+# build doesn't need; a site whose bot check refuses MDM's own connection stays refused.
+mdm-engine = { path = "../engine", default-features = false }
+mdm-torrent = { path = "../torrent" }
+jni = "0.21"
+tokio = { version = "1", features = ["rt-multi-thread", "time"] }
+http = "1"
+serde_json = "1"
+url = "2"
+base64 = "0.22"
+
+# A workspace of its own: the desktop workspace excludes this folder (Cargo.toml there), so the
+# desktop build and its Cargo.lock never see `jni`.
+[workspace]
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
+# Never "abort": a panic is caught at the JNI door (lib.rs `guard`) and returned as an error.
+panic = "unwind"

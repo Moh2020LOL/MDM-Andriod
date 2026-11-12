@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Mister Download Manager</string>
+    <string name="channel_name">Downloads</string>
+    <string name="add_title">Add a download</string>
+    <string name="add_hint">Link or magnet link</string>
+    <string name="add_video">This is a video page (YouTube and others)</string>
+    <string name="add_button">Download</string>
+    <string name="cancel">Cancel</string>
+    <string name="open_torrent">Open a .torrent file</string>
+    <string name="empty">No downloads yet. Tap + and paste a link.</string>
+    <string name="pause">Pause</string>
+    <string name="resume">Resume</string>
+    <string name="remove">Remove</string>
+    <string name="remove_with_file">Remove and delete the file</string>
+    <string name="status_queued">Waiting…</string>
+    <string name="status_running">Downloading</string>
+    <string name="status_paused">Paused</string>
+    <string name="status_done">Finished</string>
+    <string name="status_failed">Failed</string>
+    <string name="of_size">%1$s of %2$s</string>
+    <string name="notification_summary">%1$d downloading · %2$s/s</string>
+    <string name="saved_in">Saved in: %1$s</string>
+</resources>
