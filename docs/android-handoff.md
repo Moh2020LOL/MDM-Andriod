@@ -21,42 +21,57 @@ torrents (those wait: the torrent client did not work yet). Required:
 
 Any library or language may be added if it helps.
 
-## State (2026-11-13)
+## State (2026-11-13, second pass: ADM-style update)
 
-Done in the code, **none of it compiled or run on a phone**:
+The owner's second request (informal Arabic, summarised): make it look like **ADM** (Advanced
+Download Manager) instead of FDM; the app must analyse ANY link (also sites yt-dlp has no
+extractor for) with a fast Rust analyser; an optional floating window/button above all apps; every
+permission; files saved automatically; fix the old app's errors (`yt-dlp failed`, a cryptic "mf2");
+and leave a file another AI can continue from (this one).
 
-- [x] Torrent removed from the Kotlin app
-- [x] FDM-style UI: top bar with the speed-mode chip, tabs, search, rows, dark mode (`Screens.kt`, `Theme.kt`)
-- [x] Queue, Fast / Moderate / Slow modes, Snail mode, settings (`Downloads.kt`, `Prefs.kt`)
-- [x] Floating "video found" window (`Overlay.kt`), optional address-bar watcher
-      (`LinkWatcherService.kt`), built-in browser with media sniffing (`BrowserScreen.kt`),
-      the on/off switch in Settings
-- [x] Permissions screen: notifications, display over other apps, battery, accessibility (optional), storage (Android 8-9)
-- [x] Public Download/MDM export, open, share (`Files.kt`)
-- [x] Icon (own vector design, adaptive) and notification icon
-- [x] Four processors (`build-rust.sh`, `build.gradle.kts` splits, workflow), 300 MB check in CI
-- [x] Rust crate: `cargo check` and `cargo test` pass on the host (3 tests)
-- [x] Static checks: every `R.string` / drawable / xml reference exists, English and Arabic strings
-      have the same keys and placeholders, all XML is well-formed, brackets balance in every .kt file
+Done in the code, **Rust verified on the host, Kotlin NOT compiled, nothing run on a phone**:
 
-Not verified (be honest about this when reporting): the Gradle build, the Rust build for the four
-Android targets (especially `i686-linux-android`), the APK sizes, anything on a device.
+- [x] **Rust page analyzer** `crates/android/src/analyze.rs`, JNI method `analyze {url, headers?}`:
+      reads a page's source (og:video, `<video>`/`<source>`, JSON-LD, escaped URLs in scripts, one
+      level of `<iframe>`), returns candidates best first (`file`, `hls`, `dash`, `page`). 5 unit
+      tests pass (`cargo test --ignore-rust-version` in `crates/android`, 8 tests total).
+- [x] **VideoEngine.kt** replaces VideoResolver.kt. yt-dlp now downloads AND merges (best video +
+      best audio, ffmpeg in the APK) itself instead of "find one address, hand it to our engine"
+      (that single-file request caused "Requested format is not available"). Failure ladder:
+      default → update yt-dlp → other YouTube clients → single file → Rust analyzer (a file goes to
+      the HTTP engine, an HLS/DASH/embedded player goes back to yt-dlp). `explain()` turns yt-dlp's
+      text into a plain sentence (English / Arabic); the raw text is kept in `Item.detail` and shown
+      under **Details** (copyable) with a **Retry** button.
+- [x] ADM-style UI (`Screens.kt`, `Theme.kt`): side drawer with categories (videos, music,
+      documents, apps, archives, images, other, with counts), tabs Downloading / Completed, dark by
+      default, paste button and "analyze this page" / "sound only (MP3)" options in the add dialog.
+- [x] Optional **floating button** above every app (`BubbleService.kt`, `ClipActivity.kt`; Settings →
+      Floating button): tap = read the clipboard link, analyse, add. Off by default.
+- [x] Optional **deep detection** (Settings): the accessibility watcher also analyses ANY page it
+      sees in a browser's address bar and shows the "video found" window. Off by default.
+- [x] A copied link is offered when the app comes to the front (`MainActivity.onWindowFocusChanged`);
+      shared text like "Title https://…" is reduced to its link (`firstLink`).
+- [x] Files are saved automatically: app folder while downloading, then exported to
+      Download/MDM (MediaStore, no permission on Android 10+). Install-apk permission added.
+- [x] Static checks: every `R.string` exists, English and Arabic keys equal, XML well-formed.
+
+Not verified (say so honestly): the Gradle build, the Rust build for the four Android targets,
+APK sizes, anything on a device, and **YouTube**: since late 2025 yt-dlp needs an external
+JavaScript runtime for YouTube and youtubedl-android bundles only Python, so YouTube depends on the
+"other clients" step working. If it fails, the next idea is to solve the challenge with the phone's
+WebView (or to bundle a small JS runtime).
 
 ## Next (in this order)
 
-1. **Run the workflow** (Actions → "Android APK" → Run workflow) or build locally
-   (`tools/android/build-rust.sh`, then `gradle -p android assembleRelease`). Fix compile errors
-   until it is green. Check the printed APK sizes against 300 MB (the universal APK is the one at risk;
-   if it is over, drop `isUniversalApk` and publish the four split APKs).
-2. On a phone: first start (permissions screen), add a link, pause/resume, a finished file appears
-   in Download/MDM and opens, Arabic layout (right to left), dark mode.
-3. Test the video flow: a YouTube link shared to the app; the in-app browser on a page with a
-   video; then with the accessibility service on, Chrome and Firefox: does the floating window
-   appear? If a browser shows only the domain in its address bar, `URL_BARS` or the approach needs
-   changing for that browser.
-4. Then, by value: editable speed limits ("Change traffic limits" in FDM), forwarding yt-dlp's
-   request headers to the engine, a details screen per download, Wi-Fi-only option, scheduler,
-   more languages (`i18n/*.tsv` → Android string resources), and torrents again.
+1. **Build**: push, run the workflow (Actions → "Android APK") or `tools/android/build-rust.sh`
+   then `gradle -p android assembleRelease`. Fix compile errors (likeliest: Compose imports,
+   the youtubedl-android callback signature in `VideoEngine.ytdlp`, `addOption` for repeated flags).
+2. On a phone: permissions screen, add a direct link, a YouTube link, a link of a small site with an
+   embedded player (the analyzer), audio-only, pause/resume a video, a failed link → Details → Retry.
+3. The owner's old errors: ask for the exact text of "mf2" (never found in this repository; the
+   Details dialog now copies yt-dlp's raw output, which is what we need).
+4. Then: editable speed limits, per-download details screen, Wi-Fi-only, scheduler, HLS download in
+   the Rust engine (so streams get multi-connection speed), more languages, torrents.
 
 ## Rules of this repository that still apply (CLAUDE.md)
 

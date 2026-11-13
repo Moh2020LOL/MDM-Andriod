@@ -24,7 +24,7 @@ enum class ThemeChoice(val id: String) {
     SYSTEM("system"), LIGHT("light"), DARK("dark");
 
     companion object {
-        fun fromId(id: String?): ThemeChoice = entries.firstOrNull { it.id == id } ?: SYSTEM
+        fun fromId(id: String?): ThemeChoice = entries.firstOrNull { it.id == id } ?: DARK
     }
 }
 
@@ -48,7 +48,15 @@ object Prefs {
     private val _overlayEnabled = MutableStateFlow(true)
     val overlayEnabled: StateFlow<Boolean> = _overlayEnabled
 
-    private val _theme = MutableStateFlow(ThemeChoice.SYSTEM)
+    /** A small always-visible floating button: tap it and the link in the clipboard is analyzed. Off by default. */
+    private val _bubbleEnabled = MutableStateFlow(false)
+    val bubbleEnabled: StateFlow<Boolean> = _bubbleEnabled
+
+    /** Deep detection: the address-bar watcher analyzes ANY page (not only known video sites). Off by default. */
+    private val _deepDetect = MutableStateFlow(false)
+    val deepDetect: StateFlow<Boolean> = _deepDetect
+
+    private val _theme = MutableStateFlow(ThemeChoice.DARK)
     val theme: StateFlow<ThemeChoice> = _theme
 
     private val _onboardingDone = MutableStateFlow(false)
@@ -61,6 +69,8 @@ object Prefs {
         _snail.value = prefs.getBoolean("snail", false)
         _overlayEnabled.value = prefs.getBoolean("overlay", true)
         _theme.value = ThemeChoice.fromId(prefs.getString("theme", null))
+        _bubbleEnabled.value = prefs.getBoolean("bubble", false)
+        _deepDetect.value = prefs.getBoolean("deep_detect", false)
         _onboardingDone.value = prefs.getBoolean("onboarding_done", false)
     }
 
@@ -77,6 +87,16 @@ object Prefs {
     fun setOverlayEnabled(on: Boolean) {
         _overlayEnabled.value = on
         prefs.edit().putBoolean("overlay", on).apply()
+    }
+
+    fun setBubbleEnabled(on: Boolean) {
+        _bubbleEnabled.value = on
+        prefs.edit().putBoolean("bubble", on).apply()
+    }
+
+    fun setDeepDetect(on: Boolean) {
+        _deepDetect.value = on
+        prefs.edit().putBoolean("deep_detect", on).apply()
     }
 
     fun setTheme(t: ThemeChoice) {

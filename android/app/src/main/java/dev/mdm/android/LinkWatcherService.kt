@@ -3,6 +3,12 @@ package dev.mdm.android
 import android.accessibilityservice.AccessibilityService
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import org.json.JSONObject
 
 /**
  * OPTIONAL. Watches the address bar of the phone's browsers and, when the page is a video page
@@ -17,6 +23,8 @@ import android.view.accessibility.AccessibilityNodeInfo
 class LinkWatcherService : AccessibilityService() {
     private var lastUrl = ""
     private var lastAt = 0L
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val analyzed = HashSet<String>()
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -37,10 +45,31 @@ class LinkWatcherService : AccessibilityService() {
         val now = System.currentTimeMillis()
         // The browser fires many events for one page: the same address counts once a minute.
         if (url == lastUrl && now - lastAt < 60_000) return
-        val match = VideoDetector.classify(url) ?: return
+        val match = VideoDetector.classify(url)
         lastUrl = url
         lastAt = now
+        if (match == null) {
+            // Deep detection (optional, off by default): ANY page is read by the Rust analyzer,
+            // so a site nobody wrote an extractor for still gets the "video found" window.
+            if (Prefs.deepDetect.value && VideoDetector.looksLikePage(url)) deepCheck(url)
+            return
+        }
         Overlay.show(this, url, video = match == VideoDetector.Match.PAGE)
+    }
+
+    private fun deepCheck(url: String) {
+        if (analyzed.size > 200) analyzed.clear()
+        if (!analyzed.add(url)) return
+        scope.launch {
+            val r = Native.invoke("analyze", JSONObject().put("url", url))
+            val c = r.optJSONArray("candidates")
+            if (c != null && c.length() > 0) Overlay.show(applicationContext, url, video = true)
+        }
+    }
+
+    override fun onDestroy() {
+        scope.cancel()
+        super.onDestroy()
     }
 
     override fun onInterrupt() {}
