@@ -1,5 +1,6 @@
 package dev.mdm.android
 
+import android.content.ClipboardManager
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -52,6 +53,29 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** The link last offered from the clipboard, so the same one is not offered twice. */
+    private var lastClip: String? = null
+
+    override fun onResume() {
+        super.onResume()
+        BubbleService.sync(this)
+    }
+
+    // Android 10+ lets only the focused app read the clipboard: a copied link is offered right away.
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (!hasFocus || incoming != null) return
+        val text = runCatching {
+            getSystemService(ClipboardManager::class.java).primaryClip
+                ?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(this)?.toString()
+        }.getOrNull().orEmpty()
+        val link = firstLink(text) ?: return
+        if (link != lastClip) {
+            lastClip = link
+            incoming = link
+        }
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handle(intent)
@@ -61,7 +85,7 @@ class MainActivity : ComponentActivity() {
         intent ?: return
         when (intent.action) {
             Intent.ACTION_VIEW -> incoming = intent.data?.toString()
-            Intent.ACTION_SEND -> incoming = intent.getStringExtra(Intent.EXTRA_TEXT)
+            Intent.ACTION_SEND -> incoming = intent.getStringExtra(Intent.EXTRA_TEXT)?.let { firstLink(it) ?: it }
         }
     }
 }

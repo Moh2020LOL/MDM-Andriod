@@ -71,14 +71,14 @@ object Downloads {
      * What the person typed, pasted, shared or caught in the browser. [video]: a web page for yt-dlp.
      * [referer]: the page a browser download came from.
      */
-    fun add(text: String, video: Boolean = false, referer: String? = null) {
+    fun add(text: String, video: Boolean = false, referer: String? = null, audio: Boolean = false) {
         val t = text.trim()
         if (t.isEmpty()) return
         scope.launch {
             val key = UUID.randomUUID().toString()
             val dir = saveDir.absolutePath
             val item = if (video) {
-                Item(key, Kind.VIDEO, t, page = t, dir = dir, title = t)
+                Item(key, Kind.VIDEO, t, page = t, dir = dir, title = t, referer = referer, audio = audio)
             } else {
                 Item(
                     key, Kind.HTTP, t, dir = dir, referer = referer,
@@ -147,15 +147,45 @@ object Downloads {
     /** Starts (or starts again) what [item] is. [schedule] already marked it running. */
     private fun begin(item: Item) {
         when (item.kind) {
-            Kind.VIDEO -> {
-                // The stream's address is short-lived: always ask for a fresh one.
-                val found = runCatching { VideoResolver.resolve(app, item.page ?: item.source) }
-                    .getOrElse { return fail(item.key, it.message ?: "yt-dlp failed") }
-                val name = found.title.replace(Regex("[\\\\/:*?\"<>|]"), "_") + "." + found.ext
-                change(item.key) { it.copy(source = found.url, title = found.title) }
-                beginHttp(item.copy(source = found.url), name, found.headers)
-            }
+            Kind.VIDEO -> beginVideo(item)
             Kind.HTTP -> beginHttp(item, null, emptyMap())
+        }
+    }
+
+    /**
+     * A page with a video: [VideoEngine] walks its ladder (yt-dlp, update, other clients, single
+     * file, the Rust page analyzer). A finished file is exported like any other; a plain file the
+     * analyzer found goes to the HTTP engine; a failure is explained and kept with its details.
+     */
+    private fun beginVideo(item: Item) {
+        var lastUi = 0L
+        val outcome = VideoEngine.run(
+            app, item.key, item.page ?: item.source, File(item.dir), item.audio, item.referer,
+        ) { p ->
+            val now = System.currentTimeMillis()
+            if (now - lastUi < 400 || !stillRunning(item.key)) return@run
+            lastUi = now
+            change(item.key) {
+                it.copy(
+                    done = if (p.total > 0) (p.total * p.pct / 100f).toLong() else it.done,
+                    total = if (p.total > 0) p.total else it.total,
+                    speed = p.speed,
+                    title = p.title?.takeIf { t -> t.isNotBlank() } ?: it.title,
+                )
+            }
+        }
+        when (outcome) {
+            is VideoEngine.Outcome.Stopped -> Unit // paused or removed: pause()/remove() did the rest
+            is VideoEngine.Outcome.Failed -> if (stillRunning(item.key)) fail(item.key, outcome.short, outcome.detail)
+            is VideoEngine.Outcome.File -> {
+                val size = outcome.path.length()
+                change(item.key) { it.copy(title = outcome.path.name, speed = 0, done = size, total = size) }
+                finishExport(item.key, outcome.path.absolutePath, size)
+            }
+            is VideoEngine.Outcome.Direct -> {
+                change(item.key) { it.copy(source = outcome.url, title = outcome.title ?: it.title) }
+                beginHttp(item.copy(source = outcome.url), null, outcome.headers)
+            }
         }
     }
 
@@ -195,6 +225,7 @@ object Downloads {
         val item = _items.value.firstOrNull { it.key == key } ?: return
         // First the status, so the poll stops looking at it before the engine lets go of it.
         change(key) { it.copy(status = Status.PAUSED, speed = 0) }
+        if (item.kind == Kind.VIDEO) VideoEngine.stop(key)
         scope.launch {
             if (item.engineId != 0L) {
                 Native.invoke("http_cancel", JSONObject().put("id", item.engineId))
@@ -209,7 +240,7 @@ object Downloads {
 
     fun resume(key: String) {
         scope.launch {
-            change(key) { it.copy(status = Status.QUEUED, error = null) }
+            change(key) { it.copy(status = Status.QUEUED, error = null, detail = null) }
             save()
             schedule()
         }
@@ -225,6 +256,7 @@ object Downloads {
         val item = _items.value.firstOrNull { it.key == key } ?: return
         // Out of the list first (same reason as in pause).
         _items.update { list -> list.filterNot { it.key == key } }
+        if (item.kind == Kind.VIDEO) VideoEngine.stop(key)
         scope.launch {
             if (item.engineId != 0L) {
                 Native.invoke("http_cancel", JSONObject().put("id", item.engineId))
@@ -323,8 +355,8 @@ object Downloads {
         _items.update { list -> list.map { if (it.key == key) f(it) else it } }
     }
 
-    private fun fail(key: String, why: String) {
-        change(key) { it.copy(status = Status.FAILED, speed = 0, engineId = 0, error = why) }
+    private fun fail(key: String, why: String, detail: String? = null) {
+        change(key) { it.copy(status = Status.FAILED, speed = 0, engineId = 0, error = why, detail = detail ?: why) }
         save()
         schedule()
     }

@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -31,6 +32,13 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ClearAll
+import androidx.compose.material.icons.filled.ContentPaste
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.FolderZip
 import androidx.compose.material.icons.filled.Image
@@ -44,7 +52,13 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.NavigationDrawerItem
+import androidx.compose.material3.NavigationDrawerItemDefaults
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
@@ -70,6 +84,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -85,9 +100,11 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.launch
 
 // ======================================================================================
-// The list: top bar with the speed-mode chip, tabs All / Active / Completed, search, rows
+// The list, laid out like a phone download manager: a side drawer with the categories (videos,
+// music, documents ...), tabs Downloading / Completed, a progress bar on every row, a + button.
 // ======================================================================================
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -97,121 +114,130 @@ fun DownloadsScreen(onBrowser: () -> Unit, onSettings: () -> Unit, prefill: Stri
     val mode by Prefs.speedMode.collectAsStateWithLifecycle()
     val snail by Prefs.snail.collectAsStateWithLifecycle()
     var tab by remember { mutableIntStateOf(0) }
+    var category by remember { mutableStateOf<FileType?>(null) }
     var searching by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
-    var menuOpen by remember { mutableStateOf(false) }
     var speedOpen by remember { mutableStateOf(false) }
     var adding by remember { mutableStateOf(false) }
+    val drawer = rememberDrawerState(DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
 
     val shown = items
-        .filter {
-            when (tab) {
-                0 -> true
-                1 -> it.status != Status.DONE
-                else -> it.status == Status.DONE
-            }
-        }
+        .filter { if (tab == 0) it.status != Status.DONE else it.status == Status.DONE }
+        .filter { category == null || it.type == category }
         .filter { query.isBlank() || it.title.contains(query, ignoreCase = true) }
 
-    Scaffold(
-        topBar = {
-            Column {
-                TopAppBar(
-                    title = {
-                        if (searching) {
-                            TextField(
-                                value = query,
-                                onValueChange = { query = it },
-                                singleLine = true,
-                                placeholder = { Text(stringResource(R.string.search_hint)) },
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                        } else {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                                Text(stringResource(R.string.app_name), fontSize = 17.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                ModeChip(mode, snail) { speedOpen = true }
-                            }
-                        }
-                    },
-                    navigationIcon = {
-                        Box {
-                            IconButton(onClick = { menuOpen = true }) { Icon(Icons.Filled.Menu, null) }
-                            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                                DropdownMenuItem(text = { Text(stringResource(R.string.menu_browser)) }, onClick = { menuOpen = false; onBrowser() })
-                                DropdownMenuItem(text = { Text(stringResource(R.string.menu_pause_all)) }, onClick = { menuOpen = false; Downloads.pauseAll() })
-                                DropdownMenuItem(text = { Text(stringResource(R.string.menu_resume_all)) }, onClick = { menuOpen = false; Downloads.resumeAll() })
-                                DropdownMenuItem(text = { Text(stringResource(R.string.menu_clear_completed)) }, onClick = { menuOpen = false; Downloads.clearCompleted() })
-                                DropdownMenuItem(text = { Text(stringResource(R.string.menu_settings)) }, onClick = { menuOpen = false; onSettings() })
-                            }
-                        }
-                    },
-                    actions = {
-                        IconButton(onClick = { searching = !searching; if (!searching) query = "" }) {
-                            Icon(if (searching) Icons.Filled.Close else Icons.Filled.Search, stringResource(R.string.search))
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MdmColors.Blue,
-                        titleContentColor = Color.White,
-                        navigationIconContentColor = Color.White,
-                        actionIconContentColor = Color.White,
-                    ),
-                )
-                TabRow(
-                    selectedTabIndex = tab,
-                    containerColor = MdmColors.Blue,
-                    contentColor = Color.White,
-                    indicator = {},
-                    divider = {},
-                ) {
-                    listOf(R.string.tab_all, R.string.tab_active, R.string.tab_completed).forEachIndexed { index, label ->
-                        Tab(
-                            selected = tab == index,
-                            onClick = { tab = index },
-                            text = {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Text(
-                                        stringResource(label),
-                                        fontSize = 13.sp,
-                                        fontWeight = if (tab == index) FontWeight.Bold else FontWeight.Normal,
-                                        color = Color.White.copy(alpha = if (tab == index) 1f else 0.7f),
-                                    )
-                                    Spacer(Modifier.height(4.dp))
-                                    Box(
-                                        Modifier.width(28.dp).height(3.dp)
-                                            .background(if (tab == index) Color.White else Color.Transparent),
-                                    )
-                                }
-                            },
-                        )
+    fun closeThen(action: () -> Unit) {
+        scope.launch { drawer.close() }
+        action()
+    }
+
+    ModalNavigationDrawer(
+        drawerState = drawer,
+        drawerContent = {
+            ModalDrawerSheet {
+                Column(Modifier.verticalScroll(rememberScrollState()).padding(vertical = 12.dp)) {
+                    Text(
+                        stringResource(R.string.app_name),
+                        fontSize = 20.sp, fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp),
+                    )
+                    DrawerEntry(Icons.Filled.Download, stringResource(R.string.drawer_downloads), items.size, category == null) {
+                        closeThen { category = null }
                     }
+                    listOf(
+                        Triple(FileType.VIDEO, Icons.Filled.Movie, R.string.cat_video),
+                        Triple(FileType.AUDIO, Icons.Filled.MusicNote, R.string.cat_audio),
+                        Triple(FileType.DOCUMENT, Icons.Filled.Description, R.string.cat_documents),
+                        Triple(FileType.APP, Icons.Filled.Android, R.string.cat_apps),
+                        Triple(FileType.ARCHIVE, Icons.Filled.FolderZip, R.string.cat_archives),
+                        Triple(FileType.IMAGE, Icons.Filled.Image, R.string.cat_images),
+                        Triple(FileType.OTHER, Icons.Filled.InsertDriveFile, R.string.cat_other),
+                    ).forEach { (type, icon, label) ->
+                        DrawerEntry(icon, stringResource(label), items.count { it.type == type }, category == type) {
+                            closeThen { category = type }
+                        }
+                    }
+                    HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                    DrawerEntry(Icons.Filled.Language, stringResource(R.string.menu_browser), null, false) { closeThen(onBrowser) }
+                    DrawerEntry(Icons.Filled.Pause, stringResource(R.string.menu_pause_all), null, false) { closeThen { Downloads.pauseAll() } }
+                    DrawerEntry(Icons.Filled.PlayArrow, stringResource(R.string.menu_resume_all), null, false) { closeThen { Downloads.resumeAll() } }
+                    DrawerEntry(Icons.Filled.ClearAll, stringResource(R.string.menu_clear_completed), null, false) { closeThen { Downloads.clearCompleted() } }
+                    DrawerEntry(Icons.Filled.Settings, stringResource(R.string.menu_settings), null, false) { closeThen(onSettings) }
                 }
             }
         },
-        floatingActionButton = {
-            FloatingActionButton(onClick = { adding = true }, containerColor = MdmColors.Blue, contentColor = Color.White, shape = CircleShape) {
-                Icon(Icons.Filled.Add, stringResource(R.string.add_title))
-            }
-        },
-    ) { padding ->
-        if (shown.isEmpty()) {
-            Box(Modifier.fillMaxSize().padding(padding).padding(32.dp), contentAlignment = Alignment.Center) {
-                Text(
-                    stringResource(
-                        when (tab) {
-                            0 -> R.string.empty_all
-                            1 -> R.string.empty_active
-                            else -> R.string.empty_completed
+    ) {
+        Scaffold(
+            topBar = {
+                Column {
+                    TopAppBar(
+                        title = {
+                            if (searching) {
+                                TextField(
+                                    value = query,
+                                    onValueChange = { query = it },
+                                    singleLine = true,
+                                    placeholder = { Text(stringResource(R.string.search_hint)) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            } else {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    Text(stringResource(R.string.app_name), fontSize = 17.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                                    ModeChip(mode, snail) { speedOpen = true }
+                                }
+                            }
                         },
-                    ),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        } else {
-            LazyColumn(Modifier.fillMaxSize().padding(padding)) {
-                items(shown, key = { it.key }) {
-                    DownloadRow(it)
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        navigationIcon = {
+                            IconButton(onClick = { scope.launch { drawer.open() } }) { Icon(Icons.Filled.Menu, null) }
+                        },
+                        actions = {
+                            IconButton(onClick = { searching = !searching; if (!searching) query = "" }) {
+                                Icon(if (searching) Icons.Filled.Close else Icons.Filled.Search, stringResource(R.string.search))
+                            }
+                            IconButton(onClick = onBrowser) { Icon(Icons.Filled.Language, stringResource(R.string.menu_browser)) }
+                        },
+                        colors = TopAppBarDefaults.topAppBarColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            titleContentColor = MaterialTheme.colorScheme.onSurface,
+                            navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
+                            actionIconContentColor = MaterialTheme.colorScheme.onSurface,
+                        ),
+                    )
+                    TabRow(
+                        selectedTabIndex = tab,
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        contentColor = MaterialTheme.colorScheme.primary,
+                    ) {
+                        listOf(R.string.tab_downloading, R.string.tab_completed).forEachIndexed { index, label ->
+                            Tab(
+                                selected = tab == index,
+                                onClick = { tab = index },
+                                text = { Text(stringResource(label), fontWeight = if (tab == index) FontWeight.Bold else FontWeight.Normal) },
+                            )
+                        }
+                    }
+                }
+            },
+            floatingActionButton = {
+                FloatingActionButton(onClick = { adding = true }, containerColor = MaterialTheme.colorScheme.primary, contentColor = Color.White, shape = CircleShape) {
+                    Icon(Icons.Filled.Add, stringResource(R.string.add_title))
+                }
+            },
+        ) { padding ->
+            if (shown.isEmpty()) {
+                Box(Modifier.fillMaxSize().padding(padding).padding(32.dp), contentAlignment = Alignment.Center) {
+                    Text(
+                        stringResource(if (tab == 0) R.string.empty_active else R.string.empty_completed),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            } else {
+                LazyColumn(Modifier.fillMaxSize().padding(padding)) {
+                    items(shown, key = { it.key }) {
+                        DownloadRow(it)
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    }
                 }
             }
         }
@@ -221,10 +247,22 @@ fun DownloadsScreen(onBrowser: () -> Unit, onSettings: () -> Unit, prefill: Stri
         AddDialog(
             initial = prefill.orEmpty(),
             onDismiss = { adding = false; onPrefillHandled() },
-            onAdd = { text, video -> Downloads.add(text, video); adding = false; onPrefillHandled() },
+            onAdd = { text, video, audio -> Downloads.add(text, video, audio = audio); adding = false; onPrefillHandled() },
         )
     }
     if (speedOpen) SpeedDialog(onDismiss = { speedOpen = false })
+}
+
+@Composable
+private fun DrawerEntry(icon: ImageVector, label: String, count: Int?, selected: Boolean, onClick: () -> Unit) {
+    NavigationDrawerItem(
+        icon = { Icon(icon, null) },
+        label = { Text(label) },
+        badge = { if (count != null && count > 0) Text(count.toString()) },
+        selected = selected,
+        onClick = onClick,
+        modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
+    )
 }
 
 @Composable
@@ -251,6 +289,7 @@ private fun DownloadRow(item: Item) {
     val context = LocalContext.current
     var menu by remember { mutableStateOf(false) }
     var confirmRemove by remember { mutableStateOf(false) }
+    var showDetails by remember { mutableStateOf(false) }
 
     Row(
         Modifier.fillMaxWidth()
@@ -274,10 +313,18 @@ private fun DownloadRow(item: Item) {
             Text(
                 if (failed && item.error != null) item.error else statusLine(item),
                 fontSize = 12.sp,
-                maxLines = 1,
+                maxLines = if (failed) 4 else 1,
                 overflow = TextOverflow.Ellipsis,
                 color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (failed) {
+                Row {
+                    TextButton(onClick = { Downloads.resume(item.key) }) { Text(stringResource(R.string.retry)) }
+                    if (item.detail != null) {
+                        TextButton(onClick = { showDetails = true }) { Text(stringResource(R.string.details)) }
+                    }
+                }
+            }
             if (item.status != Status.DONE) {
                 LinearProgressIndicator(
                     progress = { item.fraction },
@@ -312,6 +359,26 @@ private fun DownloadRow(item: Item) {
                 DropdownMenuItem(text = { Text(stringResource(R.string.remove)) }, onClick = { menu = false; confirmRemove = true })
             }
         }
+    }
+
+    if (showDetails && item.detail != null) {
+        AlertDialog(
+            onDismissRequest = { showDetails = false },
+            title = { Text(stringResource(R.string.details)) },
+            text = {
+                SelectionContainer {
+                    Text(item.detail, fontSize = 11.sp, modifier = Modifier.verticalScroll(rememberScrollState()))
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    context.getSystemService(ClipboardManager::class.java)
+                        .setPrimaryClip(ClipData.newPlainText("details", item.detail))
+                    Toast.makeText(context, R.string.details_copied, Toast.LENGTH_SHORT).show()
+                }) { Text(stringResource(R.string.details_copy)) }
+            },
+            dismissButton = { TextButton(onClick = { showDetails = false }) { Text(stringResource(R.string.ok)) } },
+        )
     }
 
     if (confirmRemove) {
@@ -379,10 +446,13 @@ private fun formatEta(seconds: Long): String = when {
 }
 
 @Composable
-private fun AddDialog(initial: String, onDismiss: () -> Unit, onAdd: (String, Boolean) -> Unit) {
-    var text by remember { mutableStateOf(initial) }
-    // A link the detector knows as a video page is ticked for the person.
-    var video by remember { mutableStateOf(VideoDetector.videoPage(initial)) }
+private fun AddDialog(initial: String, onDismiss: () -> Unit, onAdd: (String, Boolean, Boolean) -> Unit) {
+    val context = LocalContext.current
+    var text by remember { mutableStateOf(firstLink(initial) ?: initial) }
+    // A known video site, or any link that looks like a web page, is ticked: the page is analyzed.
+    fun page(t: String) = VideoDetector.videoPage(t) || VideoDetector.looksLikePage(t)
+    var video by remember { mutableStateOf(page(text.trim())) }
+    var audio by remember { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.add_title)) },
@@ -390,17 +460,30 @@ private fun AddDialog(initial: String, onDismiss: () -> Unit, onAdd: (String, Bo
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
                     value = text,
-                    onValueChange = { text = it; video = VideoDetector.videoPage(it.trim()) },
+                    onValueChange = { text = it; video = page(it.trim()) },
                     label = { Text(stringResource(R.string.add_hint)) },
                     modifier = Modifier.fillMaxWidth(),
+                    trailingIcon = {
+                        IconButton(onClick = {
+                            val clip = context.getSystemService(ClipboardManager::class.java).primaryClip
+                                ?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()
+                            firstLink(clip)?.let { text = it; video = page(it) }
+                        }) { Icon(Icons.Filled.ContentPaste, stringResource(R.string.paste_link)) }
+                    },
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(checked = video, onCheckedChange = { video = it })
-                    Text(stringResource(R.string.add_video))
+                    Text(stringResource(R.string.add_analyze), fontSize = 14.sp)
+                }
+                if (video) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = audio, onCheckedChange = { audio = it })
+                        Text(stringResource(R.string.add_audio), fontSize = 14.sp)
+                    }
                 }
             }
         },
-        confirmButton = { Button(onClick = { onAdd(text, video) }) { Text(stringResource(R.string.add_button)) } },
+        confirmButton = { Button(onClick = { onAdd(firstLink(text) ?: text, video, video && audio) }) { Text(stringResource(R.string.add_button)) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
     )
 }
@@ -471,6 +554,8 @@ fun SettingsScreen(onBack: () -> Unit, onPermissions: () -> Unit) {
     val context = LocalContext.current
     val theme by Prefs.theme.collectAsStateWithLifecycle()
     val overlay by Prefs.overlayEnabled.collectAsStateWithLifecycle()
+    val bubble by Prefs.bubbleEnabled.collectAsStateWithLifecycle()
+    val deep by Prefs.deepDetect.collectAsStateWithLifecycle()
     var speedOpen by remember { mutableStateOf(false) }
     var tick by remember { mutableIntStateOf(0) }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { tick++ }
@@ -484,9 +569,9 @@ fun SettingsScreen(onBack: () -> Unit, onPermissions: () -> Unit) {
             title = { Text(stringResource(R.string.settings_title)) },
             navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back)) } },
             colors = TopAppBarDefaults.topAppBarColors(
-                containerColor = MdmColors.Blue,
-                titleContentColor = Color.White,
-                navigationIconContentColor = Color.White,
+                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                titleContentColor = MaterialTheme.colorScheme.onSurface,
+                navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
             ),
         )
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -503,6 +588,26 @@ fun SettingsScreen(onBack: () -> Unit, onPermissions: () -> Unit) {
                 TextButton(onClick = {
                     Permissions.settingsIntent(context, Permissions.Kind.OVERLAY)?.let { context.startActivity(it) }
                 }) { Text(stringResource(R.string.perm_allow)) }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.settings_deep))
+                    Text(stringResource(R.string.settings_deep_desc), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Switch(checked = deep, onCheckedChange = { Prefs.setDeepDetect(it) })
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.settings_bubble))
+                    Text(stringResource(R.string.settings_bubble_desc), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Switch(checked = bubble, onCheckedChange = {
+                    Prefs.setBubbleEnabled(it)
+                    BubbleService.sync(context)
+                    if (it && !canOverlay) {
+                        Permissions.settingsIntent(context, Permissions.Kind.OVERLAY)?.let { i -> context.startActivity(i) }
+                    }
+                })
             }
             HorizontalDivider()
 

@@ -7,7 +7,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
-/** The blue, white and slate of the Free Download Manager phone screens this app is styled after. */
+/** Neutral dark surfaces with a blue accent: a phone download manager's look (own colours, no one's artwork). */
 object MdmColors {
     val Blue = Color(0xFF1E88E5)
     val BlueDark = Color(0xFF1565C0)
@@ -39,9 +39,9 @@ private val Dark = darkColorScheme(
     primaryContainer = Color(0xFF123B63),
     onPrimaryContainer = Color(0xFFD6E8FB),
     secondary = Color(0xFF4DA3F0),
-    background = MdmColors.SlateDeep,
-    surface = MdmColors.SlateDeep,
-    surfaceVariant = MdmColors.Slate,
+    background = Color(0xFF121417),
+    surface = Color(0xFF121417),
+    surfaceVariant = Color(0xFF1C2026),
     onSurface = Color(0xFFE6EBEF),
     onSurfaceVariant = Color(0xFF9FB0BC),
     outlineVariant = Color(0xFF37474F),

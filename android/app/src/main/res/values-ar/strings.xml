@@ -102,4 +102,36 @@
     <!-- Accessibility service -->
     <string name="watcher_label">اكتشاف روابط Mister Download Manager</string>
     <string name="watcher_description">يقرأ شريط عنوان المتصفحات ليعرض تنزيل الفيديوهات. لا يقرأ محتوى الصفحات.</string>
+
+    <!-- ADM-style drawer, categories -->
+    <string name="drawer_downloads">كل التنزيلات</string>
+    <string name="cat_video">فيديوهات</string>
+    <string name="cat_audio">صوتيات</string>
+    <string name="cat_documents">مستندات</string>
+    <string name="cat_apps">تطبيقات</string>
+    <string name="cat_archives">ملفات مضغوطة</string>
+    <string name="cat_images">صور</string>
+    <string name="cat_other">أخرى</string>
+    <string name="tab_downloading">قيد التحميل</string>
+    <string name="paste_link">لصق رابط</string>
+
+    <!-- Add dialog -->
+    <string name="add_analyze">هذه صفحة ويب: ابحث عن الفيديو فيها</string>
+    <string name="add_audio">صوت فقط (MP3)</string>
+
+    <!-- Failures -->
+    <string name="retry">إعادة المحاولة</string>
+    <string name="details">التفاصيل</string>
+    <string name="details_copy">نسخ التفاصيل</string>
+    <string name="details_copied">تم نسخ التفاصيل</string>
+
+    <!-- Floating button and deep detection -->
+    <string name="settings_bubble">الزر العائم</string>
+    <string name="settings_bubble_desc">زر دائري فوق كل التطبيقات. انسخ أي رابط، اضغط الزر، والتطبيق يحلّل الرابط ويحمّل.</string>
+    <string name="settings_deep">تحليل أي صفحة (كشف عميق)</string>
+    <string name="settings_deep_desc">مع تشغيل كشف روابط الفيديو، التطبيق يقرأ كمان الصفحات اللي بتزورها ليلاقي فيديو بأي موقع. بيقرأ العنوان ومصدر الصفحة فقط، ولا يخرج من جوالك شي غير طلب الصفحة نفسه.</string>
+    <string name="bubble_channel">الزر العائم</string>
+    <string name="bubble_notification">زر التحميل العائم شغّال</string>
+    <string name="clip_no_link">ما في رابط في الحافظة. انسخ رابط أولاً.</string>
+    <string name="clipboard_link">رابط في الحافظة</string>
 </resources>

@@ -102,4 +102,36 @@
     <!-- Accessibility service -->
     <string name="watcher_label">Mister Download Manager link detection</string>
     <string name="watcher_description">Reads the address bar of browsers to offer downloading videos. It does not read page content.</string>
+
+    <!-- ADM-style drawer, categories -->
+    <string name="drawer_downloads">All downloads</string>
+    <string name="cat_video">Videos</string>
+    <string name="cat_audio">Music</string>
+    <string name="cat_documents">Documents</string>
+    <string name="cat_apps">Apps</string>
+    <string name="cat_archives">Archives</string>
+    <string name="cat_images">Images</string>
+    <string name="cat_other">Other</string>
+    <string name="tab_downloading">Downloading</string>
+    <string name="paste_link">Paste link</string>
+
+    <!-- Add dialog -->
+    <string name="add_analyze">This is a web page: find the video in it</string>
+    <string name="add_audio">Sound only (MP3)</string>
+
+    <!-- Failures -->
+    <string name="retry">Retry</string>
+    <string name="details">Details</string>
+    <string name="details_copy">Copy details</string>
+    <string name="details_copied">Details copied</string>
+
+    <!-- Floating button and deep detection -->
+    <string name="settings_bubble">Floating button</string>
+    <string name="settings_bubble_desc">A round button above every app. Copy a link anywhere, tap it, and the app analyzes the link and downloads.</string>
+    <string name="settings_deep">Analyze any page (deep detection)</string>
+    <string name="settings_deep_desc">With the video-link detection turned on, the app also reads the pages you visit to find video on any site. It reads only the address and the page source, and nothing leaves your phone but the page request itself.</string>
+    <string name="bubble_channel">Floating button</string>
+    <string name="bubble_notification">Floating download button is on</string>
+    <string name="clip_no_link">No link in the clipboard. Copy a link first.</string>
+    <string name="clipboard_link">Link in clipboard</string>
 </resources>

@@ -24,7 +24,8 @@ the `torrent_*` calls in the first version of `Downloads.kt`.
 | `Item.kt` | One list row (`Item`), its `Kind` (HTTP, VIDEO), `Status`, `FileType`, JSON save/load |
 | `Downloads.kt` | The list, the queue (`schedule()`: at most `Prefs.maxSimultaneous()` run, oldest waiting first), the speed limit shared between running downloads (`applyLimits()`), polling the Rust library every 500 ms, saving `downloads.json`, exporting a finished file |
 | `Native.kt` | The one JNI function: `Native.invoke(method, json)`. Methods are listed in `crates/android/src/lib.rs` |
-| `VideoResolver.kt` | yt-dlp (youtubedl-android) turns a video page into a direct stream address; the engine downloads it |
+| `VideoEngine.kt` | Video pages: yt-dlp downloads and merges itself, with a failure ladder ending in the Rust analyzer; `explain()` turns errors into plain sentences |
+| `BubbleService.kt`, `ClipActivity.kt` | Optional floating button above every app; tap reads the clipboard link and adds it |
 | `VideoDetector.kt` | Is this link a direct media file or a video page of a known site? One list of site patterns, used everywhere |
 | `Overlay.kt` | The floating "Video found: Download" window over other apps (plain views, draggable, hides after 15 s) |
 | `LinkWatcherService.kt` | OPTIONAL accessibility service: reads only the address bar of listed browsers and calls `Overlay.show` for video links. Address-bar ids are in `URL_BARS` |
@@ -86,6 +87,8 @@ watched), `res/xml/file_paths.xml` (FileProvider), `res/drawable/ic_launcher_*.x
 7. Exporting to the public folder copies the file (briefly twice the space).
 
 ## Change log
+
+- **2026-11-13 (second pass)**: ADM-style UI (drawer with categories, Downloading/Completed tabs, dark by default); `VideoEngine` replaces `VideoResolver` (yt-dlp downloads and merges, five-step failure ladder, explained errors, Details + Retry); Rust page analyzer `analyze` (`crates/android/src/analyze.rs`, tested on the host); optional floating button and deep detection; clipboard link offered on focus; MissingTranslation lint off. Kotlin not compiled.
 
 - **2026-11-13**: FDM-style UI (tabs, search, speed chip, type icons, dark mode); queue and speed
   modes; settings; built-in browser with media sniffing; floating "video found" window (optional,

@@ -6,7 +6,7 @@ import android.net.Uri
  * Decides whether a link is something worth offering to download as a video:
  *  - [directMedia]: the link IS a media file (.mp4, .webm, .mp3 ...): the engine downloads it as it is.
  *  - [videoPage]: the link is a page of a site yt-dlp understands (a YouTube watch page ...): handed
- *    to [VideoResolver], which finds the stream.
+ *    to [VideoEngine], which downloads it (and falls back to the Rust page analyzer).
  * Used by the in-app browser, by [Overlay] through [LinkWatcherService], and by the share sheet.
  */
 object VideoDetector {
@@ -44,6 +44,23 @@ object VideoDetector {
     }
 
     fun videoPage(url: String): Boolean = pages.any { it.containsMatchIn(url) }
+
+    private val fileExt = setOf(
+        "zip", "rar", "7z", "tar", "gz", "xz", "bz2", "iso", "apk", "xapk", "pdf", "doc", "docx",
+        "xls", "xlsx", "ppt", "pptx", "txt", "epub", "jpg", "jpeg", "png", "gif", "webp", "exe", "msi", "dmg",
+    )
+
+    /**
+     * A link that is probably a web page (no file extension, or .html/.php ...): worth ANALYZING
+     * for the media it holds, instead of downloading the page itself.
+     */
+    fun looksLikePage(url: String): Boolean {
+        if (!url.startsWith("http", ignoreCase = true)) return false
+        if (directMedia(url)) return false
+        val path = runCatching { Uri.parse(url).path }.getOrNull()?.lowercase().orEmpty()
+        val ext = path.substringAfterLast('.', "").takeIf { '/' !in it }.orEmpty()
+        return ext.isEmpty() || ext in setOf("html", "htm", "php", "asp", "aspx", "jsp", "shtml") || (ext !in fileExt && ext.length > 5)
+    }
 
     fun classify(url: String, mime: String? = null): Match? = when {
         !url.startsWith("http", ignoreCase = true) -> null

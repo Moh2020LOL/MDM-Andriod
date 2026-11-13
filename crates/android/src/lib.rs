@@ -12,6 +12,7 @@
 //! desktop workspace's `unsafe_code = "deny"` doesn't reach it (it has a workspace of its own).
 #![allow(unsafe_code)]
 
+mod analyze;
 mod http_dl;
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -73,6 +74,7 @@ fn dispatch(method: &str, args: &Value) -> Reply {
     match method {
         "init" => init(args),
         "probe" => http_dl::probe(args),
+        "analyze" => analyze::analyze(args),
         "http_start" => http_dl::start(args),
         "http_resume" => http_dl::resume(args),
         "http_snapshot" => http_dl::snapshot(args),

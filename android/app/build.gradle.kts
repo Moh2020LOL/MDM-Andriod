@@ -48,6 +48,9 @@ android {
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true }
 
+    // Only English and Arabic have every text; the other languages fall back to English.
+    lint { disable += "MissingTranslation" }
+
     packaging {
         // youtubedl-android unpacks its Python and yt-dlp from the APK's native libraries.
         jniLibs { useLegacyPackaging = true }

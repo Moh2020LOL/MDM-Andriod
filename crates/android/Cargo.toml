@@ -22,6 +22,8 @@ http = "1"
 serde_json = "1"
 url = "2"
 base64 = "0.22"
+# The page analyzer (src/analyze.rs): finds the media a web page holds, whatever the site.
+regex = "1"
 
 # A workspace of its own: the desktop workspace excludes this folder (Cargo.toml there), so the
 # desktop build and its Cargo.lock never see `jni`.
