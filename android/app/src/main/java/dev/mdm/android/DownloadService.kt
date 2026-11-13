@@ -37,8 +37,10 @@ class DownloadService : Service() {
         )
         startForegroundCompat(notification(0, 0))
         // A partial wake lock: the CPU stays on for the connections while the screen sleeps.
+        // Taken for ten minutes at a time and renewed below while downloads run, so it can't
+        // run out in the middle of a long download (or stay held if the app is killed).
         wake = getSystemService(PowerManager::class.java)
-            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "mdm:downloads").apply { acquire(6 * 60 * 60 * 1000L) }
+            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "mdm:downloads")
 
         scope.launch {
             Downloads.items.collectLatest { list ->
@@ -46,6 +48,7 @@ class DownloadService : Service() {
                 if (running.isEmpty()) {
                     stopSelf()
                 } else {
+                    wake?.takeIf { !it.isHeld }?.acquire(10 * 60 * 1000L)
                     nm.notify(ID, notification(running.size, running.sumOf { it.speed }))
                 }
             }
@@ -53,6 +56,15 @@ class DownloadService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
+
+    /**
+     * Android 15 ends a `dataSync` service after about six hours a day and waits for it to stop
+     * within seconds, or the app crashes. This service runs as `specialUse` on Android 14+ (no such
+     * limit, see startForegroundCompat); this is the safety net for a system that applies it anyway.
+     */
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        stopSelf()
+    }
 
     override fun onDestroy() {
         scope.cancel()
@@ -76,7 +88,10 @@ class DownloadService : Service() {
     }
 
     private fun startForegroundCompat(n: Notification) {
-        if (Build.VERSION.SDK_INT >= 29) {
+        if (Build.VERSION.SDK_INT >= 34) {
+            // A download manager runs as long as there is something to download: not a "data sync".
+            startForeground(ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        } else if (Build.VERSION.SDK_INT >= 29) {
             startForeground(ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
         } else {
             startForeground(ID, n)

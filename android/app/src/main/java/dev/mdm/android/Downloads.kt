@@ -153,26 +153,28 @@ object Downloads {
                     .getOrElse { return fail(item.key, it.message ?: "yt-dlp failed") }
                 val name = found.title.replace(Regex("[\\\\/:*?\"<>|]"), "_") + "." + found.ext
                 change(item.key) { it.copy(source = found.url, title = found.title) }
-                beginHttp(item.copy(source = found.url), name)
+                beginHttp(item.copy(source = found.url), name, found.headers)
             }
-            Kind.HTTP -> beginHttp(item, null)
+            Kind.HTTP -> beginHttp(item, null, emptyMap())
         }
     }
 
-    private fun headersFor(item: Item): JSONObject {
+    /** [extra]: what yt-dlp sent to find a video's stream; the stream's address is only good with it. */
+    private fun headersFor(item: Item, extra: Map<String, String>): JSONObject {
         val h = JSONObject()
-        item.referer?.let { h.put("Referer", it) }
+        extra.forEach { (k, v) -> h.put(k, v) }
+        if (!h.has("Referer")) item.referer?.let { h.put("Referer", it) }
         // Cookies the in-app browser holds for this site (a login, a "human check" already passed).
         val cookie = runCatching { CookieManager.getInstance().getCookie(item.source) }.getOrNull()
-        if (!cookie.isNullOrEmpty()) h.put("Cookie", cookie)
+        if (!cookie.isNullOrEmpty() && !h.has("Cookie")) h.put("Cookie", cookie)
         return h
     }
 
-    private fun beginHttp(item: Item, name: String?) {
+    private fun beginHttp(item: Item, name: String?, extraHeaders: Map<String, String>) {
         // Paused while the address was being asked for: don't start.
         if (!stillRunning(item.key)) return
         val limit = perDownloadLimit()
-        val headers = headersFor(item)
+        val headers = headersFor(item, extraHeaders)
         val state = item.stateFile
         val r = if (state != null && File(state).exists()) {
             Native.invoke(
@@ -191,6 +193,8 @@ object Downloads {
 
     fun pause(key: String) {
         val item = _items.value.firstOrNull { it.key == key } ?: return
+        // First the status, so the poll stops looking at it before the engine lets go of it.
+        change(key) { it.copy(status = Status.PAUSED, speed = 0) }
         scope.launch {
             if (item.engineId != 0L) {
                 Native.invoke("http_cancel", JSONObject().put("id", item.engineId))
@@ -219,6 +223,8 @@ object Downloads {
 
     fun remove(key: String, deleteFile: Boolean) {
         val item = _items.value.firstOrNull { it.key == key } ?: return
+        // Out of the list first (same reason as in pause).
+        _items.update { list -> list.filterNot { it.key == key } }
         scope.launch {
             if (item.engineId != 0L) {
                 Native.invoke("http_cancel", JSONObject().put("id", item.engineId))
@@ -256,9 +262,16 @@ object Downloads {
         }
     }
 
+    /** True while [item] is still the running download the poll saw (not paused, removed or restarted since). */
+    private fun isCurrent(item: Item): Boolean =
+        _items.value.any { it.key == item.key && it.status == Status.RUNNING && it.engineId == item.engineId }
+
     private fun tick(item: Item) {
-        if (item.engineId == 0L) return // still starting (a video's address is being asked for)
+        if (item.engineId == 0L) return // still starting (a video's address is being asked for), or being saved
         val s = Native.invoke("http_snapshot", JSONObject().put("id", item.engineId))
+        // Pause or remove may have let go of the engine's download since the poll's list was taken:
+        // "no such download" then is not a failure.
+        if (!isCurrent(item)) return
         s.error()?.let { return fail(item.key, it) }
         change(item.key) {
             it.copy(
@@ -274,25 +287,34 @@ object Downloads {
                 val r = Native.invoke("http_finish", JSONObject().put("id", item.engineId))
                 r.error()?.let { return fail(item.key, it) }
                 val path = r.getString("path")
-                // Android 10+: into the public Download/MDM folder, and the private copy goes.
-                val publicUri = Files.exportToPublicDownloads(app, File(path))
-                if (publicUri != null) File(path).delete()
-                change(item.key) {
-                    it.copy(
-                        status = Status.DONE, speed = 0, engineId = 0,
-                        file = if (publicUri != null) null else path,
-                        uri = publicUri?.toString(),
-                        done = r.getLong("size"), total = r.getLong("size"),
-                    )
-                }
-                save()
-                schedule()
+                val size = r.getLong("size")
+                // The engine is let go: no more polling of this one (engineId 0), while the copy
+                // into the public folder runs on its own coroutine, so a big file doesn't stop the
+                // other downloads' progress.
+                change(item.key) { it.copy(speed = 0, engineId = 0, done = size, total = size) }
+                scope.launch { finishExport(item.key, path, size) }
             }
             "Failed" -> {
                 Native.invoke("http_finish", JSONObject().put("id", item.engineId))
                 fail(item.key, s.optString("error").ifEmpty { "failed" })
             }
         }
+    }
+
+    /** Android 10+: into the public Download/MDM folder, and the private copy goes. */
+    private fun finishExport(key: String, path: String, size: Long) {
+        val publicUri = Files.exportToPublicDownloads(app, File(path))
+        if (publicUri != null) File(path).delete()
+        change(key) {
+            it.copy(
+                status = Status.DONE, speed = 0, engineId = 0,
+                file = if (publicUri != null) null else path,
+                uri = publicUri?.toString(),
+                done = size, total = size,
+            )
+        }
+        save()
+        schedule()
     }
 
     // ---- the list ----

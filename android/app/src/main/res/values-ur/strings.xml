@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Mister Download Manager</string>
+    <string name="channel_name">ڈاؤن لوڈز</string>
+    <string name="notification_summary">%1$d ڈاؤن لوڈ ہو رہی ہیں · %2$s/s</string>
+
+    <!-- Main list -->
+    <string name="tab_all">سب</string>
+    <string name="tab_active">فعال</string>
+    <string name="tab_completed">مکمل</string>
+    <string name="menu_browser">براؤزر</string>
+    <string name="menu_pause_all">سب روکیں</string>
+    <string name="menu_resume_all">سب جاری کریں</string>
+    <string name="menu_clear_completed">مکمل شدہ صاف کریں</string>
+    <string name="menu_settings">ترتیبات</string>
+    <string name="search">تلاش</string>
+    <string name="search_hint">ڈاؤن لوڈز میں تلاش کریں</string>
+    <string name="back">واپس</string>
+    <string name="add_title">ڈاؤن لوڈ شامل کریں</string>
+    <string name="add_hint">لنک</string>
+    <string name="add_video">یہ ویڈیو کا صفحہ ہے (یوٹیوب اور دیگر)</string>
+    <string name="add_button">ڈاؤن لوڈ</string>
+    <string name="cancel">منسوخ</string>
+    <string name="ok">ٹھیک ہے</string>
+    <string name="empty_all">ابھی کوئی ڈاؤن لوڈ نہیں۔ + دبائیں اور لنک پیسٹ کریں، یا مینو سے براؤزر کھولیں۔</string>
+    <string name="empty_active">کچھ ڈاؤن لوڈ نہیں ہو رہا۔</string>
+    <string name="empty_completed">ابھی کوئی ڈاؤن لوڈ مکمل نہیں ہوا۔</string>
+    <string name="pause">روکیں</string>
+    <string name="resume">جاری کریں</string>
+    <string name="open">کھولیں</string>
+    <string name="share">شیئر کریں</string>
+    <string name="copy_link">لنک کاپی کریں</string>
+    <string name="link_copied">لنک کاپی ہو گیا</string>
+    <string name="cannot_open">کوئی ایپ اس فائل کو نہیں کھول سکتی</string>
+    <string name="remove">ہٹائیں</string>
+    <string name="remove_with_file">ہٹائیں اور فائل حذف کریں</string>
+    <string name="status_queued">انتظار میں…</string>
+    <string name="status_running">ڈاؤن لوڈ ہو رہی ہے</string>
+    <string name="status_paused">رکی ہوئی</string>
+    <string name="status_done">مکمل</string>
+    <string name="status_failed">ناکام</string>
+    <string name="of_size">%1$s از %2$s</string>
+    <string name="eta_seconds">%1$d سیکنڈ باقی</string>
+    <string name="eta_minutes">%1$d منٹ باقی</string>
+    <string name="eta_hours">%1$d گھنٹے %2$d منٹ باقی</string>
+    <string name="saved_in">محفوظ کیا گیا: %1$s</string>
+
+    <!-- Speed modes -->
+    <string name="speed_title">رفتار کا موڈ</string>
+    <string name="mode_fast">تیز موڈ</string>
+    <string name="mode_moderate">درمیانہ موڈ</string>
+    <string name="mode_slow">سست موڈ</string>
+    <string name="mode_snail">گھونگا موڈ</string>
+    <string name="speed_desc_unlimited">کوئی حد نہیں · بیک وقت %1$d ڈاؤن لوڈز تک</string>
+    <string name="speed_desc_limit">%1$s/s · بیک وقت %2$d ڈاؤن لوڈز تک</string>
+    <string name="snail_title">گھونگا موڈ</string>
+    <string name="snail_desc">ڈاؤن لوڈز روکے بغیر آپ کی بینڈوڈتھ آزاد کرتا ہے</string>
+
+    <!-- Video found: floating window and browser -->
+    <string name="overlay_found">یہ ویڈیو ڈاؤن لوڈ کریں؟</string>
+    <string name="overlay_download">ڈاؤن لوڈ</string>
+    <string name="overlay_added">ڈاؤن لوڈز میں شامل ہو گیا</string>
+    <string name="browser_video_found">اس صفحے پر ویڈیو</string>
+    <string name="browser_media_found">%1$d میڈیا فائلیں ملیں</string>
+    <string name="browser_pick_media">فائل منتخب کریں</string>
+
+    <!-- Settings -->
+    <string name="settings_title">ترتیبات</string>
+    <string name="settings_video">ویڈیو کی شناخت</string>
+    <string name="overlay_switch">ویڈیو ملنے پر تیرتی ہوئی ونڈو</string>
+    <string name="overlay_switch_desc">دوسری ایپس کے اوپر ڈاؤن لوڈ کا بٹن دکھاتا ہے۔ آپ اسے کسی بھی وقت بند کر سکتے ہیں۔</string>
+    <string name="overlay_needs_permission">اس کے لیے دوسری ایپس کے اوپر دکھانے کی اجازت درکار ہے۔</string>
+    <string name="settings_speed">رفتار</string>
+    <string name="settings_appearance">ظاہری شکل</string>
+    <string name="theme_system">فون کے مطابق</string>
+    <string name="theme_light">روشن</string>
+    <string name="theme_dark">تاریک</string>
+    <string name="settings_permissions">اجازتیں</string>
+    <string name="settings_permissions_open">اجازتوں کا جائزہ لیں</string>
+    <string name="settings_storage">فائلیں کہاں محفوظ ہوتی ہیں</string>
+    <string name="settings_storage_public">Download/MDM فولڈر</string>
+    <string name="settings_about">کے بارے میں</string>
+
+    <!-- Permissions screen -->
+    <string name="perm_title">ایپ کو بہترین انداز میں کام کرنے دیں</string>
+    <string name="perm_subtitle">جو چاہیں اجازت دیں۔ ہر ایک کی وضاحت دی گئی ہے، اور آپ انہیں بعد میں بدل سکتے ہیں۔</string>
+    <string name="perm_notifications_title">اطلاعات</string>
+    <string name="perm_notifications_why">آپ کی ڈاؤن لوڈز کی پیش رفت دکھاتی ہیں اور اطلاع سے ہی انہیں کنٹرول کرنے دیتی ہیں۔</string>
+    <string name="perm_overlay_title">دوسری ایپس کے اوپر دکھائیں</string>
+    <string name="perm_overlay_why">ویڈیو ملتے ہی ڈاؤن لوڈ کا بٹن آپ کے براؤزر کے اوپر آ جاتا ہے۔</string>
+    <string name="perm_battery_title">پس منظر میں چلائیں</string>
+    <string name="perm_battery_why">اسکرین بند ہونے پر اینڈرائیڈ کو طویل ڈاؤن لوڈز سلا دینے سے روکتی ہے۔</string>
+    <string name="perm_accessibility_title">ویڈیو لنک کی شناخت</string>
+    <string name="perm_accessibility_why">اختیاری۔ ایپ کو آپ کے براؤزر کا ایڈریس بار پڑھنے دیتی ہے (صرف ایڈریس، اور کچھ نہیں) تاکہ کسی بھی براؤزر میں ویڈیو کے صفحات پہچانے جا سکیں۔ ایکسیسبیلٹی کی ترتیبات میں Mister Download Manager کو آن کریں۔</string>
+    <string name="perm_storage_title">اسٹوریج</string>
+    <string name="perm_storage_why">آپ کی فائلیں Download فولڈر میں محفوظ کرتی ہے (صرف اینڈرائیڈ 8 اور 9)۔</string>
+    <string name="perm_allow">اجازت دیں</string>
+    <string name="perm_granted">اجازت مل گئی</string>
+    <string name="perm_optional">اختیاری</string>
+    <string name="perm_continue">جاری رکھیں</string>
+
+    <!-- Accessibility service -->
+    <string name="watcher_label">Mister Download Manager لنک کی شناخت</string>
+    <string name="watcher_description">ویڈیو ڈاؤن لوڈ کرنے کی پیشکش کے لیے براؤزرز کا ایڈریس بار پڑھتی ہے۔ یہ صفحے کا مواد نہیں پڑھتی۔</string>
+</resources>

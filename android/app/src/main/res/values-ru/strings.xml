@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Mister Download Manager</string>
+    <string name="channel_name">Загрузки</string>
+    <string name="notification_summary">Загружается: %1$d · %2$s/с</string>
+
+    <!-- Main list -->
+    <string name="tab_all">Все</string>
+    <string name="tab_active">Активные</string>
+    <string name="tab_completed">Завершённые</string>
+    <string name="menu_browser">Браузер</string>
+    <string name="menu_pause_all">Приостановить все</string>
+    <string name="menu_resume_all">Возобновить все</string>
+    <string name="menu_clear_completed">Очистить завершённые</string>
+    <string name="menu_settings">Настройки</string>
+    <string name="search">Поиск</string>
+    <string name="search_hint">Поиск загрузок</string>
+    <string name="back">Назад</string>
+    <string name="add_title">Добавить загрузку</string>
+    <string name="add_hint">Ссылка</string>
+    <string name="add_video">Это страница с видео (YouTube и другие)</string>
+    <string name="add_button">Скачать</string>
+    <string name="cancel">Отмена</string>
+    <string name="ok">ОК</string>
+    <string name="empty_all">Загрузок пока нет. Нажмите + и вставьте ссылку или откройте браузер из меню.</string>
+    <string name="empty_active">Сейчас ничего не загружается.</string>
+    <string name="empty_completed">Завершённых загрузок пока нет.</string>
+    <string name="pause">Пауза</string>
+    <string name="resume">Продолжить</string>
+    <string name="open">Открыть</string>
+    <string name="share">Поделиться</string>
+    <string name="copy_link">Копировать ссылку</string>
+    <string name="link_copied">Ссылка скопирована</string>
+    <string name="cannot_open">Нет приложения для открытия этого файла</string>
+    <string name="remove">Удалить</string>
+    <string name="remove_with_file">Удалить вместе с файлом</string>
+    <string name="status_queued">Ожидание…</string>
+    <string name="status_running">Загрузка</string>
+    <string name="status_paused">Приостановлено</string>
+    <string name="status_done">Завершено</string>
+    <string name="status_failed">Ошибка</string>
+    <string name="of_size">%1$s из %2$s</string>
+    <string name="eta_seconds">Осталось %1$d с</string>
+    <string name="eta_minutes">Осталось %1$d мин</string>
+    <string name="eta_hours">Осталось %1$d ч %2$d мин</string>
+    <string name="saved_in">Сохранено в: %1$s</string>
+
+    <!-- Speed modes -->
+    <string name="speed_title">Режим скорости</string>
+    <string name="mode_fast">Быстрый режим</string>
+    <string name="mode_moderate">Умеренный режим</string>
+    <string name="mode_slow">Медленный режим</string>
+    <string name="mode_snail">Режим улитки</string>
+    <string name="speed_desc_unlimited">Без ограничений · загрузок одновременно: до %1$d</string>
+    <string name="speed_desc_limit">%1$s/с · загрузок одновременно: до %2$d</string>
+    <string name="snail_title">Режим улитки</string>
+    <string name="snail_desc">Освобождает канал, не останавливая загрузки</string>
+
+    <!-- Video found: floating window and browser -->
+    <string name="overlay_found">Скачать это видео?</string>
+    <string name="overlay_download">Скачать</string>
+    <string name="overlay_added">Добавлено в загрузки</string>
+    <string name="browser_video_found">Видео на этой странице</string>
+    <string name="browser_media_found">Найдено медиафайлов: %1$d</string>
+    <string name="browser_pick_media">Выберите файл</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Настройки</string>
+    <string name="settings_video">Обнаружение видео</string>
+    <string name="overlay_switch">Плавающее окно при обнаружении видео</string>
+    <string name="overlay_switch_desc">Показывает кнопку «Скачать» поверх других приложений. Это можно отключить в любой момент.</string>
+    <string name="overlay_needs_permission">Для этого нужно разрешение на показ поверх других приложений.</string>
+    <string name="settings_speed">Скорость</string>
+    <string name="settings_appearance">Оформление</string>
+    <string name="theme_system">Как в телефоне</string>
+    <string name="theme_light">Светлая</string>
+    <string name="theme_dark">Тёмная</string>
+    <string name="settings_permissions">Разрешения</string>
+    <string name="settings_permissions_open">Проверить разрешения</string>
+    <string name="settings_storage">Куда сохраняются файлы</string>
+    <string name="settings_storage_public">Папка Download/MDM</string>
+    <string name="settings_about">О приложении</string>
+
+    <!-- Permissions screen -->
+    <string name="perm_title">Чтобы приложение работало лучше</string>
+    <string name="perm_subtitle">Разрешайте то, что считаете нужным. Каждое разрешение объяснено, и позже их можно изменить.</string>
+    <string name="perm_notifications_title">Уведомления</string>
+    <string name="perm_notifications_why">Показывают ход загрузок и позволяют управлять ими из уведомления.</string>
+    <string name="perm_overlay_title">Поверх других приложений</string>
+    <string name="perm_overlay_why">Позволяет кнопке «Скачать» появиться поверх браузера, как только найдено видео.</string>
+    <string name="perm_battery_title">Работа в фоне</string>
+    <string name="perm_battery_why">Не даёт Android усыплять долгие загрузки при выключенном экране.</string>
+    <string name="perm_accessibility_title">Обнаружение ссылок на видео</string>
+    <string name="perm_accessibility_why">Необязательно. Позволяет приложению читать адресную строку браузера (только адрес, больше ничего), чтобы замечать страницы с видео в любом браузере. В настройках специальных возможностей включите Mister Download Manager.</string>
+    <string name="perm_storage_title">Память</string>
+    <string name="perm_storage_why">Сохраняет файлы в папку Download (только Android 8 и 9).</string>
+    <string name="perm_allow">Разрешить</string>
+    <string name="perm_granted">Разрешено</string>
+    <string name="perm_optional">Необязательно</string>
+    <string name="perm_continue">Продолжить</string>
+
+    <!-- Accessibility service -->
+    <string name="watcher_label">Обнаружение ссылок Mister Download Manager</string>
+    <string name="watcher_description">Читает адресную строку браузеров, чтобы предложить скачать видео. Содержимое страниц не читается.</string>
+</resources>

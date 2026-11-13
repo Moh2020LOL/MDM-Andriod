@@ -2,6 +2,7 @@ package dev.mdm.android
 
 import android.accessibilityservice.AccessibilityService
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityNodeInfo
 
 /**
  * OPTIONAL. Watches the address bar of the phone's browsers and, when the page is a video page
@@ -28,8 +29,11 @@ class LinkWatcherService : AccessibilityService() {
         val pkg = event.packageName?.toString() ?: return
         val barId = URL_BARS[pkg] ?: return
         val root = rootInActiveWindow ?: return
-        val node = root.findAccessibilityNodeInfosByViewId(barId).firstOrNull() ?: return
-        val url = normalize(node.text?.toString()) ?: return
+        // The browser's known address bar first; when it renamed that id, any view of the page
+        // whose id looks like an address bar (still only the address, never the page's content).
+        val text = root.findAccessibilityNodeInfosByViewId(barId).firstOrNull()?.text?.toString()
+            ?: findAddressText(root)
+        val url = normalize(text) ?: return
         val now = System.currentTimeMillis()
         // The browser fires many events for one page: the same address counts once a minute.
         if (url == lastUrl && now - lastAt < 60_000) return
@@ -40,6 +44,27 @@ class LinkWatcherService : AccessibilityService() {
     }
 
     override fun onInterrupt() {}
+
+    /**
+     * Fallback for a renamed address bar: a breadth-first look (at most [MAX_NODES] views) for a
+     * view whose id says it is the address (url, omnibar, location bar) and whose text is a link.
+     */
+    private fun findAddressText(root: AccessibilityNodeInfo): String? {
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        queue.add(root)
+        var seen = 0
+        while (queue.isNotEmpty() && seen < MAX_NODES) {
+            val n = queue.removeFirst()
+            seen++
+            val id = n.viewIdResourceName?.lowercase()
+            if (id != null && ADDRESS_HINTS.any { it in id }) {
+                val t = n.text?.toString()
+                if (normalize(t) != null) return t
+            }
+            for (i in 0 until n.childCount) n.getChild(i)?.let { queue.add(it) }
+        }
+        return null
+    }
 
     companion object {
         /** Package name -> the id of its address bar. */
@@ -54,7 +79,15 @@ class LinkWatcherService : AccessibilityService() {
             "com.sec.android.app.sbrowser" to "com.sec.android.app.sbrowser:id/location_bar_edit_text",
             "com.kiwibrowser.browser" to "com.kiwibrowser.browser:id/url_bar",
             "com.vivaldi.browser" to "com.vivaldi.browser:id/url_bar",
+            "org.mozilla.firefox_beta" to "org.mozilla.firefox_beta:id/mozac_browser_toolbar_url_view",
+            "org.mozilla.fenix.nightly" to "org.mozilla.fenix.nightly:id/mozac_browser_toolbar_url_view",
+            "com.duckduckgo.mobile.android" to "com.duckduckgo.mobile.android:id/omnibarTextInput",
+            "com.sec.android.app.sbrowser.beta" to "com.sec.android.app.sbrowser.beta:id/location_bar_edit_text",
+            "com.yandex.browser" to "com.yandex.browser:id/bro_omnibar_address_title_text",
         )
+
+        private const val MAX_NODES = 400
+        private val ADDRESS_HINTS = listOf("url", "omnibar", "location_bar", "address")
 
         /** The text of an address bar as a link, or null when it isn't one (a search being typed). */
         fun normalize(raw: String?): String? {

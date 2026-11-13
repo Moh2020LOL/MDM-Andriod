@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Mister Download Manager</string>
+    <string name="channel_name">Unduhan</string>
+    <string name="notification_summary">%1$d sedang diunduh · %2$s/dtk</string>
+
+    <!-- Main list -->
+    <string name="tab_all">Semua</string>
+    <string name="tab_active">Aktif</string>
+    <string name="tab_completed">Selesai</string>
+    <string name="menu_browser">Browser</string>
+    <string name="menu_pause_all">Jeda semua</string>
+    <string name="menu_resume_all">Lanjutkan semua</string>
+    <string name="menu_clear_completed">Hapus yang selesai</string>
+    <string name="menu_settings">Pengaturan</string>
+    <string name="search">Cari</string>
+    <string name="search_hint">Cari unduhan</string>
+    <string name="back">Kembali</string>
+    <string name="add_title">Tambah unduhan</string>
+    <string name="add_hint">Tautan</string>
+    <string name="add_video">Ini halaman video (YouTube dan lainnya)</string>
+    <string name="add_button">Unduh</string>
+    <string name="cancel">Batal</string>
+    <string name="ok">OK</string>
+    <string name="empty_all">Belum ada unduhan. Ketuk + lalu tempel tautan, atau buka browser dari menu.</string>
+    <string name="empty_active">Tidak ada yang sedang diunduh.</string>
+    <string name="empty_completed">Belum ada unduhan yang selesai.</string>
+    <string name="pause">Jeda</string>
+    <string name="resume">Lanjutkan</string>
+    <string name="open">Buka</string>
+    <string name="share">Bagikan</string>
+    <string name="copy_link">Salin tautan</string>
+    <string name="link_copied">Tautan disalin</string>
+    <string name="cannot_open">Tidak ada aplikasi yang dapat membuka file ini</string>
+    <string name="remove">Hapus</string>
+    <string name="remove_with_file">Hapus beserta filenya</string>
+    <string name="status_queued">Menunggu…</string>
+    <string name="status_running">Mengunduh</string>
+    <string name="status_paused">Dijeda</string>
+    <string name="status_done">Selesai</string>
+    <string name="status_failed">Gagal</string>
+    <string name="of_size">%1$s dari %2$s</string>
+    <string name="eta_seconds">Sisa %1$d dtk</string>
+    <string name="eta_minutes">Sisa %1$d mnt</string>
+    <string name="eta_hours">Sisa %1$d j %2$d mnt</string>
+    <string name="saved_in">Disimpan di: %1$s</string>
+
+    <!-- Speed modes -->
+    <string name="speed_title">Mode kecepatan</string>
+    <string name="mode_fast">Mode cepat</string>
+    <string name="mode_moderate">Mode sedang</string>
+    <string name="mode_slow">Mode lambat</string>
+    <string name="mode_snail">Mode siput</string>
+    <string name="speed_desc_unlimited">Tanpa batas · hingga %1$d unduhan sekaligus</string>
+    <string name="speed_desc_limit">%1$s/dtk · hingga %2$d unduhan sekaligus</string>
+    <string name="snail_title">Mode siput</string>
+    <string name="snail_desc">Melonggarkan bandwidth Anda tanpa menghentikan unduhan</string>
+
+    <!-- Video found: floating window and browser -->
+    <string name="overlay_found">Unduh video ini?</string>
+    <string name="overlay_download">Unduh</string>
+    <string name="overlay_added">Ditambahkan ke unduhan</string>
+    <string name="browser_video_found">Video di halaman ini</string>
+    <string name="browser_media_found">%1$d file media ditemukan</string>
+    <string name="browser_pick_media">Pilih file</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Pengaturan</string>
+    <string name="settings_video">Deteksi video</string>
+    <string name="overlay_switch">Jendela mengambang saat video ditemukan</string>
+    <string name="overlay_switch_desc">Menampilkan tombol Unduh di atas aplikasi lain. Anda dapat mematikannya kapan saja.</string>
+    <string name="overlay_needs_permission">Ini memerlukan izin untuk tampil di atas aplikasi lain.</string>
+    <string name="settings_speed">Kecepatan</string>
+    <string name="settings_appearance">Tampilan</string>
+    <string name="theme_system">Ikuti ponsel</string>
+    <string name="theme_light">Terang</string>
+    <string name="theme_dark">Gelap</string>
+    <string name="settings_permissions">Izin</string>
+    <string name="settings_permissions_open">Tinjau izin</string>
+    <string name="settings_storage">Lokasi penyimpanan file</string>
+    <string name="settings_storage_public">Folder Download/MDM</string>
+    <string name="settings_about">Tentang</string>
+
+    <!-- Permissions screen -->
+    <string name="perm_title">Agar aplikasi bekerja optimal</string>
+    <string name="perm_subtitle">Izinkan sesuai keinginan Anda. Setiap izin dijelaskan, dan dapat diubah nanti.</string>
+    <string name="perm_notifications_title">Notifikasi</string>
+    <string name="perm_notifications_why">Menampilkan kemajuan unduhan dan memungkinkan Anda mengendalikannya dari notifikasi.</string>
+    <string name="perm_overlay_title">Tampil di atas aplikasi lain</string>
+    <string name="perm_overlay_why">Membuat tombol Unduh muncul di atas browser begitu video ditemukan.</string>
+    <string name="perm_battery_title">Berjalan di latar belakang</string>
+    <string name="perm_battery_why">Mencegah Android menidurkan unduhan yang lama saat layar mati.</string>
+    <string name="perm_accessibility_title">Deteksi tautan video</string>
+    <string name="perm_accessibility_why">Opsional. Memungkinkan aplikasi membaca bilah alamat browser Anda (hanya alamatnya, tidak yang lain) untuk mengenali halaman video di browser mana pun. Di pengaturan Aksesibilitas, aktifkan Mister Download Manager.</string>
+    <string name="perm_storage_title">Penyimpanan</string>
+    <string name="perm_storage_why">Menyimpan file Anda di folder Download (hanya Android 8 dan 9).</string>
+    <string name="perm_allow">Izinkan</string>
+    <string name="perm_granted">Diizinkan</string>
+    <string name="perm_optional">Opsional</string>
+    <string name="perm_continue">Lanjutkan</string>
+
+    <!-- Accessibility service -->
+    <string name="watcher_label">Deteksi tautan Mister Download Manager</string>
+    <string name="watcher_description">Membaca bilah alamat browser untuk menawarkan pengunduhan video. Tidak membaca isi halaman.</string>
+</resources>

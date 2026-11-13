@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Mister Download Manager</string>
+    <string name="channel_name">İndirmeler</string>
+    <string name="notification_summary">%1$d indiriliyor · %2$s/sn</string>
+
+    <!-- Main list -->
+    <string name="tab_all">Tümü</string>
+    <string name="tab_active">Etkin</string>
+    <string name="tab_completed">Tamamlanan</string>
+    <string name="menu_browser">Tarayıcı</string>
+    <string name="menu_pause_all">Tümünü duraklat</string>
+    <string name="menu_resume_all">Tümünü sürdür</string>
+    <string name="menu_clear_completed">Tamamlananları temizle</string>
+    <string name="menu_settings">Ayarlar</string>
+    <string name="search">Ara</string>
+    <string name="search_hint">İndirmelerde ara</string>
+    <string name="back">Geri</string>
+    <string name="add_title">İndirme ekle</string>
+    <string name="add_hint">Bağlantı</string>
+    <string name="add_video">Bu bir video sayfası (YouTube ve diğerleri)</string>
+    <string name="add_button">İndir</string>
+    <string name="cancel">İptal</string>
+    <string name="ok">Tamam</string>
+    <string name="empty_all">Henüz indirme yok. + simgesine dokunup bir bağlantı yapıştırın ya da menüden tarayıcıyı açın.</string>
+    <string name="empty_active">İndirilen bir şey yok.</string>
+    <string name="empty_completed">Henüz biten indirme yok.</string>
+    <string name="pause">Duraklat</string>
+    <string name="resume">Sürdür</string>
+    <string name="open">Aç</string>
+    <string name="share">Paylaş</string>
+    <string name="copy_link">Bağlantıyı kopyala</string>
+    <string name="link_copied">Bağlantı kopyalandı</string>
+    <string name="cannot_open">Bu dosyayı açabilecek uygulama yok</string>
+    <string name="remove">Kaldır</string>
+    <string name="remove_with_file">Kaldır ve dosyayı sil</string>
+    <string name="status_queued">Bekleniyor…</string>
+    <string name="status_running">İndiriliyor</string>
+    <string name="status_paused">Duraklatıldı</string>
+    <string name="status_done">Bitti</string>
+    <string name="status_failed">Başarısız</string>
+    <string name="of_size">%1$s / %2$s</string>
+    <string name="eta_seconds">%1$d sn kaldı</string>
+    <string name="eta_minutes">%1$d dk kaldı</string>
+    <string name="eta_hours">%1$d sa %2$d dk kaldı</string>
+    <string name="saved_in">Kaydedildiği yer: %1$s</string>
+
+    <!-- Speed modes -->
+    <string name="speed_title">Hız modu</string>
+    <string name="mode_fast">Hızlı mod</string>
+    <string name="mode_moderate">Orta mod</string>
+    <string name="mode_slow">Yavaş mod</string>
+    <string name="mode_snail">Salyangoz modu</string>
+    <string name="speed_desc_unlimited">Sınırsız · aynı anda en fazla %1$d indirme</string>
+    <string name="speed_desc_limit">%1$s/sn · aynı anda en fazla %2$d indirme</string>
+    <string name="snail_title">Salyangoz modu</string>
+    <string name="snail_desc">İndirmeleri durdurmadan internet bant genişliğinizi boşaltır</string>
+
+    <!-- Video found: floating window and browser -->
+    <string name="overlay_found">Bu video indirilsin mi?</string>
+    <string name="overlay_download">İndir</string>
+    <string name="overlay_added">İndirmelere eklendi</string>
+    <string name="browser_video_found">Bu sayfada video var</string>
+    <string name="browser_media_found">%1$d medya dosyası bulundu</string>
+    <string name="browser_pick_media">Bir dosya seçin</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Ayarlar</string>
+    <string name="settings_video">Video algılama</string>
+    <string name="overlay_switch">Video bulunduğunda yüzen pencere</string>
+    <string name="overlay_switch_desc">Diğer uygulamaların üzerinde bir İndir düğmesi gösterir. İstediğiniz zaman kapatabilirsiniz.</string>
+    <string name="overlay_needs_permission">Bunun için diğer uygulamaların üzerinde görüntüleme izni gerekir.</string>
+    <string name="settings_speed">Hız</string>
+    <string name="settings_appearance">Görünüm</string>
+    <string name="theme_system">Telefonu izle</string>
+    <string name="theme_light">Açık</string>
+    <string name="theme_dark">Koyu</string>
+    <string name="settings_permissions">İzinler</string>
+    <string name="settings_permissions_open">İzinleri gözden geçir</string>
+    <string name="settings_storage">Dosyaların kaydedildiği yer</string>
+    <string name="settings_storage_public">Download/MDM klasörü</string>
+    <string name="settings_about">Hakkında</string>
+
+    <!-- Permissions screen -->
+    <string name="perm_title">Uygulama en iyi şekilde çalışsın</string>
+    <string name="perm_subtitle">İstediklerinize izin verin. Her biri açıklanmıştır ve sonradan değiştirebilirsiniz.</string>
+    <string name="perm_notifications_title">Bildirimler</string>
+    <string name="perm_notifications_why">İndirmelerinizin ilerleyişini gösterir ve bildirimden denetlemenizi sağlar.</string>
+    <string name="perm_overlay_title">Diğer uygulamaların üzerinde görüntüle</string>
+    <string name="perm_overlay_why">Bir video bulunur bulunmaz İndir düğmesinin tarayıcınızın üzerinde görünmesini sağlar.</string>
+    <string name="perm_battery_title">Arka planda çalış</string>
+    <string name="perm_battery_why">Ekran kapalıyken Android\'in uzun indirmeleri uyku moduna almasını engeller.</string>
+    <string name="perm_accessibility_title">Video bağlantısı algılama</string>
+    <string name="perm_accessibility_why">İsteğe bağlı. Uygulamanın, herhangi bir tarayıcıda video sayfalarını fark etmek için tarayıcınızın adres çubuğunu (yalnızca adresi, başka hiçbir şeyi) okumasını sağlar. Erişilebilirlik ayarlarında Mister Download Manager\'ı açın.</string>
+    <string name="perm_storage_title">Depolama</string>
+    <string name="perm_storage_why">Dosyalarınızı Download klasörüne kaydeder (yalnızca Android 8 ve 9).</string>
+    <string name="perm_allow">İzin ver</string>
+    <string name="perm_granted">İzin verildi</string>
+    <string name="perm_optional">İsteğe bağlı</string>
+    <string name="perm_continue">Devam</string>
+
+    <!-- Accessibility service -->
+    <string name="watcher_label">Mister Download Manager bağlantı algılama</string>
+    <string name="watcher_description">Videoların indirilmesini önermek için tarayıcıların adres çubuğunu okur. Sayfa içeriğini okumaz.</string>
+</resources>

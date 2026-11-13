@@ -2,8 +2,7 @@
 //!
 //! The Kotlin app (`android/`) holds the screens, the notifications and the foreground service;
 //! this library holds what downloads: `mdm-engine` (HTTP, HTTPS, FTP, FTPS: segments, resume,
-//! limits) and `mdm-torrent` (BitTorrent and magnet links, librqbit). They reach each other
-//! through ONE native function, `Native.call(method, argsJson): String`, with JSON on both sides:
+//! limits). The two reach each other through ONE native function, `Native.call(method, argsJson): String`, with JSON on both sides:
 //! one place where the two languages meet, nothing to keep in step but the method names below.
 //!
 //! Every answer is a JSON object; a failure is `{"error": "<text>"}`, never an exception (a
@@ -28,7 +27,7 @@ use tokio::runtime::Runtime;
 /// What every method returns: the answer, or the error's text.
 pub(crate) type Reply = Result<Value, String>;
 
-/// The runtime every download and the torrent session run on (the engine needs one around it).
+/// The runtime every download runs on (the engine needs one around it).
 pub(crate) fn rt() -> &'static Runtime {
     static RT: OnceLock<Runtime> = OnceLock::new();
     RT.get_or_init(|| {

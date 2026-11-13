@@ -1,6 +1,6 @@
 [package]
 name = "mdm-android"
-description = "Mister Download Manager's Android library: the download engine and the torrent client behind one JNI call, for the Kotlin app in android/"
+description = "Mister Download Manager's Android library: the download engine behind one JNI call, for the Kotlin app in android/"
 version = "0.5.2"
 edition = "2024"
 rust-version = "1.98"

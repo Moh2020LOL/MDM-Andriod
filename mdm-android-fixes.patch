@@ -1,0 +1,1404 @@
+diff --git a/android/app/src/main/AndroidManifest.xml b/android/app/src/main/AndroidManifest.xml
+index 18a71bf..c45b032 100644
+--- a/android/app/src/main/AndroidManifest.xml
++++ b/android/app/src/main/AndroidManifest.xml
+@@ -7,6 +7,7 @@
+     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
++    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+     <!-- The floating "video found" window over other apps (the person grants it; can be switched off). -->
+     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+     <!-- Asks Android to let long downloads run with the screen off. -->
+@@ -23,6 +24,7 @@
+         android:roundIcon="@mipmap/ic_launcher_round"
+         android:label="@string/app_name"
+         android:supportsRtl="true"
++        android:localeConfig="@xml/locales_config"
+         android:theme="@style/Theme.MDM"
+         android:usesCleartextTraffic="true">
+ 
+@@ -56,7 +58,12 @@
+         <service
+             android:name=".DownloadService"
+             android:exported="false"
+-            android:foregroundServiceType="dataSync" />
++            android:foregroundServiceType="dataSync|specialUse">
++            <!-- Android 14+: why this is not a "data sync" (which Android 15 stops after about six hours). -->
++            <property
++                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
++                android:value="download_manager" />
++        </service>
+ 
+         <!-- OPTIONAL: reads browsers' address bars to notice video pages (res/xml/link_watcher.xml). -->
+         <service
+diff --git a/android/app/src/main/java/dev/mdm/android/DownloadService.kt b/android/app/src/main/java/dev/mdm/android/DownloadService.kt
+index 09e7973..df44420 100644
+--- a/android/app/src/main/java/dev/mdm/android/DownloadService.kt
++++ b/android/app/src/main/java/dev/mdm/android/DownloadService.kt
+@@ -37,8 +37,10 @@ class DownloadService : Service() {
+         )
+         startForegroundCompat(notification(0, 0))
+         // A partial wake lock: the CPU stays on for the connections while the screen sleeps.
++        // Taken for ten minutes at a time and renewed below while downloads run, so it can't
++        // run out in the middle of a long download (or stay held if the app is killed).
+         wake = getSystemService(PowerManager::class.java)
+-            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "mdm:downloads").apply { acquire(6 * 60 * 60 * 1000L) }
++            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "mdm:downloads")
+ 
+         scope.launch {
+             Downloads.items.collectLatest { list ->
+@@ -46,6 +48,7 @@ class DownloadService : Service() {
+                 if (running.isEmpty()) {
+                     stopSelf()
+                 } else {
++                    wake?.takeIf { !it.isHeld }?.acquire(10 * 60 * 1000L)
+                     nm.notify(ID, notification(running.size, running.sumOf { it.speed }))
+                 }
+             }
+@@ -54,6 +57,15 @@ class DownloadService : Service() {
+ 
+     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
+ 
++    /**
++     * Android 15 ends a `dataSync` service after about six hours a day and waits for it to stop
++     * within seconds, or the app crashes. This service runs as `specialUse` on Android 14+ (no such
++     * limit, see startForegroundCompat); this is the safety net for a system that applies it anyway.
++     */
++    override fun onTimeout(startId: Int, fgsType: Int) {
++        stopSelf()
++    }
++
+     override fun onDestroy() {
+         scope.cancel()
+         wake?.takeIf { it.isHeld }?.release()
+@@ -76,7 +88,10 @@ class DownloadService : Service() {
+     }
+ 
+     private fun startForegroundCompat(n: Notification) {
+-        if (Build.VERSION.SDK_INT >= 29) {
++        if (Build.VERSION.SDK_INT >= 34) {
++            // A download manager runs as long as there is something to download: not a "data sync".
++            startForeground(ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
++        } else if (Build.VERSION.SDK_INT >= 29) {
+             startForeground(ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+         } else {
+             startForeground(ID, n)
+diff --git a/android/app/src/main/java/dev/mdm/android/Downloads.kt b/android/app/src/main/java/dev/mdm/android/Downloads.kt
+index 06ac353..572311f 100644
+--- a/android/app/src/main/java/dev/mdm/android/Downloads.kt
++++ b/android/app/src/main/java/dev/mdm/android/Downloads.kt
+@@ -153,26 +153,28 @@ object Downloads {
+                     .getOrElse { return fail(item.key, it.message ?: "yt-dlp failed") }
+                 val name = found.title.replace(Regex("[\\\\/:*?\"<>|]"), "_") + "." + found.ext
+                 change(item.key) { it.copy(source = found.url, title = found.title) }
+-                beginHttp(item.copy(source = found.url), name)
++                beginHttp(item.copy(source = found.url), name, found.headers)
+             }
+-            Kind.HTTP -> beginHttp(item, null)
++            Kind.HTTP -> beginHttp(item, null, emptyMap())
+         }
+     }
+ 
+-    private fun headersFor(item: Item): JSONObject {
++    /** [extra]: what yt-dlp sent to find a video's stream; the stream's address is only good with it. */
++    private fun headersFor(item: Item, extra: Map<String, String>): JSONObject {
+         val h = JSONObject()
+-        item.referer?.let { h.put("Referer", it) }
++        extra.forEach { (k, v) -> h.put(k, v) }
++        if (!h.has("Referer")) item.referer?.let { h.put("Referer", it) }
+         // Cookies the in-app browser holds for this site (a login, a "human check" already passed).
+         val cookie = runCatching { CookieManager.getInstance().getCookie(item.source) }.getOrNull()
+-        if (!cookie.isNullOrEmpty()) h.put("Cookie", cookie)
++        if (!cookie.isNullOrEmpty() && !h.has("Cookie")) h.put("Cookie", cookie)
+         return h
+     }
+ 
+-    private fun beginHttp(item: Item, name: String?) {
++    private fun beginHttp(item: Item, name: String?, extraHeaders: Map<String, String>) {
+         // Paused while the address was being asked for: don't start.
+         if (!stillRunning(item.key)) return
+         val limit = perDownloadLimit()
+-        val headers = headersFor(item)
++        val headers = headersFor(item, extraHeaders)
+         val state = item.stateFile
+         val r = if (state != null && File(state).exists()) {
+             Native.invoke(
+@@ -191,6 +193,8 @@ object Downloads {
+ 
+     fun pause(key: String) {
+         val item = _items.value.firstOrNull { it.key == key } ?: return
++        // First the status, so the poll stops looking at it before the engine lets go of it.
++        change(key) { it.copy(status = Status.PAUSED, speed = 0) }
+         scope.launch {
+             if (item.engineId != 0L) {
+                 Native.invoke("http_cancel", JSONObject().put("id", item.engineId))
+@@ -219,6 +223,8 @@ object Downloads {
+ 
+     fun remove(key: String, deleteFile: Boolean) {
+         val item = _items.value.firstOrNull { it.key == key } ?: return
++        // Out of the list first (same reason as in pause).
++        _items.update { list -> list.filterNot { it.key == key } }
+         scope.launch {
+             if (item.engineId != 0L) {
+                 Native.invoke("http_cancel", JSONObject().put("id", item.engineId))
+@@ -256,9 +262,16 @@ object Downloads {
+         }
+     }
+ 
++    /** True while [item] is still the running download the poll saw (not paused, removed or restarted since). */
++    private fun isCurrent(item: Item): Boolean =
++        _items.value.any { it.key == item.key && it.status == Status.RUNNING && it.engineId == item.engineId }
++
+     private fun tick(item: Item) {
+-        if (item.engineId == 0L) return // still starting (a video's address is being asked for)
++        if (item.engineId == 0L) return // still starting (a video's address is being asked for), or being saved
+         val s = Native.invoke("http_snapshot", JSONObject().put("id", item.engineId))
++        // Pause or remove may have let go of the engine's download since the poll's list was taken:
++        // "no such download" then is not a failure.
++        if (!isCurrent(item)) return
+         s.error()?.let { return fail(item.key, it) }
+         change(item.key) {
+             it.copy(
+@@ -274,19 +287,12 @@ object Downloads {
+                 val r = Native.invoke("http_finish", JSONObject().put("id", item.engineId))
+                 r.error()?.let { return fail(item.key, it) }
+                 val path = r.getString("path")
+-                // Android 10+: into the public Download/MDM folder, and the private copy goes.
+-                val publicUri = Files.exportToPublicDownloads(app, File(path))
+-                if (publicUri != null) File(path).delete()
+-                change(item.key) {
+-                    it.copy(
+-                        status = Status.DONE, speed = 0, engineId = 0,
+-                        file = if (publicUri != null) null else path,
+-                        uri = publicUri?.toString(),
+-                        done = r.getLong("size"), total = r.getLong("size"),
+-                    )
+-                }
+-                save()
+-                schedule()
++                val size = r.getLong("size")
++                // The engine is let go: no more polling of this one (engineId 0), while the copy
++                // into the public folder runs on its own coroutine, so a big file doesn't stop the
++                // other downloads' progress.
++                change(item.key) { it.copy(speed = 0, engineId = 0, done = size, total = size) }
++                scope.launch { finishExport(item.key, path, size) }
+             }
+             "Failed" -> {
+                 Native.invoke("http_finish", JSONObject().put("id", item.engineId))
+@@ -295,6 +301,22 @@ object Downloads {
+         }
+     }
+ 
++    /** Android 10+: into the public Download/MDM folder, and the private copy goes. */
++    private fun finishExport(key: String, path: String, size: Long) {
++        val publicUri = Files.exportToPublicDownloads(app, File(path))
++        if (publicUri != null) File(path).delete()
++        change(key) {
++            it.copy(
++                status = Status.DONE, speed = 0, engineId = 0,
++                file = if (publicUri != null) null else path,
++                uri = publicUri?.toString(),
++                done = size, total = size,
++            )
++        }
++        save()
++        schedule()
++    }
++
+     // ---- the list ----
+ 
+     private fun change(key: String, f: (Item) -> Item) {
+diff --git a/android/app/src/main/java/dev/mdm/android/LinkWatcherService.kt b/android/app/src/main/java/dev/mdm/android/LinkWatcherService.kt
+index 5fbfffe..0fc1059 100644
+--- a/android/app/src/main/java/dev/mdm/android/LinkWatcherService.kt
++++ b/android/app/src/main/java/dev/mdm/android/LinkWatcherService.kt
+@@ -2,6 +2,7 @@ package dev.mdm.android
+ 
+ import android.accessibilityservice.AccessibilityService
+ import android.view.accessibility.AccessibilityEvent
++import android.view.accessibility.AccessibilityNodeInfo
+ 
+ /**
+  * OPTIONAL. Watches the address bar of the phone's browsers and, when the page is a video page
+@@ -28,8 +29,11 @@ class LinkWatcherService : AccessibilityService() {
+         val pkg = event.packageName?.toString() ?: return
+         val barId = URL_BARS[pkg] ?: return
+         val root = rootInActiveWindow ?: return
+-        val node = root.findAccessibilityNodeInfosByViewId(barId).firstOrNull() ?: return
+-        val url = normalize(node.text?.toString()) ?: return
++        // The browser's known address bar first; when it renamed that id, any view of the page
++        // whose id looks like an address bar (still only the address, never the page's content).
++        val text = root.findAccessibilityNodeInfosByViewId(barId).firstOrNull()?.text?.toString()
++            ?: findAddressText(root)
++        val url = normalize(text) ?: return
+         val now = System.currentTimeMillis()
+         // The browser fires many events for one page: the same address counts once a minute.
+         if (url == lastUrl && now - lastAt < 60_000) return
+@@ -41,6 +45,27 @@ class LinkWatcherService : AccessibilityService() {
+ 
+     override fun onInterrupt() {}
+ 
++    /**
++     * Fallback for a renamed address bar: a breadth-first look (at most [MAX_NODES] views) for a
++     * view whose id says it is the address (url, omnibar, location bar) and whose text is a link.
++     */
++    private fun findAddressText(root: AccessibilityNodeInfo): String? {
++        val queue = ArrayDeque<AccessibilityNodeInfo>()
++        queue.add(root)
++        var seen = 0
++        while (queue.isNotEmpty() && seen < MAX_NODES) {
++            val n = queue.removeFirst()
++            seen++
++            val id = n.viewIdResourceName?.lowercase()
++            if (id != null && ADDRESS_HINTS.any { it in id }) {
++                val t = n.text?.toString()
++                if (normalize(t) != null) return t
++            }
++            for (i in 0 until n.childCount) n.getChild(i)?.let { queue.add(it) }
++        }
++        return null
++    }
++
+     companion object {
+         /** Package name -> the id of its address bar. */
+         val URL_BARS = mapOf(
+@@ -54,8 +79,16 @@ class LinkWatcherService : AccessibilityService() {
+             "com.sec.android.app.sbrowser" to "com.sec.android.app.sbrowser:id/location_bar_edit_text",
+             "com.kiwibrowser.browser" to "com.kiwibrowser.browser:id/url_bar",
+             "com.vivaldi.browser" to "com.vivaldi.browser:id/url_bar",
++            "org.mozilla.firefox_beta" to "org.mozilla.firefox_beta:id/mozac_browser_toolbar_url_view",
++            "org.mozilla.fenix.nightly" to "org.mozilla.fenix.nightly:id/mozac_browser_toolbar_url_view",
++            "com.duckduckgo.mobile.android" to "com.duckduckgo.mobile.android:id/omnibarTextInput",
++            "com.sec.android.app.sbrowser.beta" to "com.sec.android.app.sbrowser.beta:id/location_bar_edit_text",
++            "com.yandex.browser" to "com.yandex.browser:id/bro_omnibar_address_title_text",
+         )
+ 
++        private const val MAX_NODES = 400
++        private val ADDRESS_HINTS = listOf("url", "omnibar", "location_bar", "address")
++
+         /** The text of an address bar as a link, or null when it isn't one (a search being typed). */
+         fun normalize(raw: String?): String? {
+             val t = raw?.trim().orEmpty()
+diff --git a/android/app/src/main/java/dev/mdm/android/VideoResolver.kt b/android/app/src/main/java/dev/mdm/android/VideoResolver.kt
+index 6a55752..da81532 100644
+--- a/android/app/src/main/java/dev/mdm/android/VideoResolver.kt
++++ b/android/app/src/main/java/dev/mdm/android/VideoResolver.kt
+@@ -3,6 +3,7 @@ package dev.mdm.android
+ import android.content.Context
+ import com.yausername.youtubedl_android.YoutubeDL
+ import com.yausername.youtubedl_android.YoutubeDLRequest
++import org.json.JSONObject
+ 
+ /**
+  * Video pages: yt-dlp (inside the app, through youtubedl-android) finds the stream's direct
+@@ -11,14 +12,30 @@ import com.yausername.youtubedl_android.YoutubeDLRequest
+  * On the desktop MDM runs yt-dlp as a separate program (crates/tools); a phone can't, so the
+  * library brings Python, yt-dlp and ffmpeg inside the APK.
+  *
++ * Why this asks yt-dlp for its JSON itself (`--dump-single-json`) instead of using the library's
++ * VideoInfo: the stream's address is only good with the headers yt-dlp used to find it (User-Agent,
++ * Referer, ...). Sites such as YouTube answer 403 to the bare address. The JSON carries them
++ * (`http_headers`) and they go to the engine along with the address.
++ *
++ * yt-dlp goes stale within weeks, so it updates itself in the background at the first use, and a
++ * failure to resolve is retried ONCE after an update finished.
++ *
+  * Limit: the address is ONE file with sound and picture together (YouTube serves those up to
+  * 720p; the higher qualities are separate picture and sound streams that need ffmpeg to join).
+  */
+ object VideoResolver {
+-    data class Found(val url: String, val title: String, val ext: String)
++    data class Found(
++        val url: String,
++        val title: String,
++        val ext: String,
++        /** What yt-dlp sent to the site: the engine sends the same with the stream's address. */
++        val headers: Map<String, String>,
++    )
+ 
+     @Volatile
+     private var ready = false
++    private val updateStarted = java.util.concurrent.atomic.AtomicBoolean(false)
++    private val updateDone = java.util.concurrent.CountDownLatch(1)
+ 
+     private fun ensureReady(context: Context) {
+         if (ready) return
+@@ -27,20 +44,77 @@ object VideoResolver {
+             YoutubeDL.getInstance().init(context.applicationContext)
+             ready = true
+         }
+-        // Sites change, and so does yt-dlp: ask for the newest, once per start, and don't wait
+-        // for it if there is no network.
+-        runCatching { YoutubeDL.getInstance().updateYoutubeDL(context.applicationContext) }
++        // Don't make the first video wait for the update: it runs on its own thread.
++        val app = context.applicationContext
++        Thread({ updateNow(app) }, "mdm-ytdlp-update").apply { isDaemon = true }.start()
++    }
++
++    /** Updates yt-dlp once per process (the first caller does the work, the others return at once). */
++    private fun updateNow(app: Context) {
++        if (!updateStarted.compareAndSet(false, true)) return
++        try {
++            // Nightly first: YouTube changes faster than stable releases; stable if that fails.
++            val yt = YoutubeDL.getInstance()
++            runCatching { yt.updateYoutubeDL(app, YoutubeDL.UpdateChannel.NIGHTLY) }
++                .recoverCatching { yt.updateYoutubeDL(app, YoutubeDL.UpdateChannel.STABLE) }
++        } finally {
++            updateDone.countDown()
++        }
++    }
++
++    /** Returns when the one update of this process has finished (at most two minutes). */
++    private fun waitForUpdate(app: Context) {
++        updateNow(app) // runs it here when nothing started it yet
++        updateDone.await(120, java.util.concurrent.TimeUnit.SECONDS)
+     }
+ 
+     /** Blocks (the first call unpacks yt-dlp): never on the main thread. Throws with yt-dlp's own message. */
+     fun resolve(context: Context, page: String): Found {
+-        ensureReady(context)
++        val app = context.applicationContext
++        ensureReady(app)
++        return try {
++            fetch(page)
++        } catch (first: Exception) {
++            // Most "yt-dlp can't do this site" failures are an old yt-dlp: update, then try once more.
++            waitForUpdate(app)
++            fetch(page)
++        }
++    }
++
++    private fun fetch(page: String): Found {
+         val request = YoutubeDLRequest(page).apply {
+-            addOption("-f", "best[ext=mp4]/best")
++            addOption("--dump-single-json")
+             addOption("--no-playlist")
++            addOption("--no-warnings")
++            addOption("-f", "best[ext=mp4]/best")
++        }
++        // (request, null, null): the call the library's own getInfo makes; `execute(request)`
++        // alone fits two of its overloads.
++        val out = YoutubeDL.getInstance().execute(request, null, null).out
++        // yt-dlp can print other lines before the JSON; the JSON is the last object.
++        val start = out.indexOf('{')
++        if (start < 0) error("yt-dlp gave no answer for this page")
++        val info = JSONObject(out.substring(start))
++        val url = info.optString("url").ifEmpty { null }
++            ?: error("yt-dlp found no single stream for this page")
++        return Found(
++            url = url,
++            title = info.optString("title").ifEmpty { page },
++            ext = info.optString("ext").ifEmpty { "mp4" },
++            headers = headersOf(info.optJSONObject("http_headers")),
++        )
++    }
++
++    /** yt-dlp's request headers minus the ones the engine decides itself. */
++    private fun headersOf(h: JSONObject?): Map<String, String> {
++        if (h == null) return emptyMap()
++        val skip = setOf("accept-encoding", "host", "content-length", "range")
++        val map = LinkedHashMap<String, String>()
++        for (k in h.keys()) {
++            if (k.lowercase() in skip) continue
++            val v = h.optString(k)
++            if (v.isNotEmpty()) map[k] = v
+         }
+-        val info = YoutubeDL.getInstance().getInfo(request)
+-        val url = info.url ?: error("yt-dlp gave no address for this page")
+-        return Found(url, info.title ?: page, info.ext ?: "mp4")
++        return map
+     }
+ }
+diff --git a/android/app/src/main/res/values-ar/strings.xml b/android/app/src/main/res/values-ar/strings.xml
+index 44a9be0..e482f5b 100644
+--- a/android/app/src/main/res/values-ar/strings.xml
++++ b/android/app/src/main/res/values-ar/strings.xml
+@@ -57,7 +57,7 @@
+     <string name="snail_desc">يوفّر سرعة الإنترنت دون إيقاف التنزيلات</string>
+ 
+     <!-- Video found: floating window and browser -->
+-    <string name="overlay_found">تم العثور على فيديو</string>
++    <string name="overlay_found">تنزيل هذا الفيديو؟</string>
+     <string name="overlay_download">تنزيل</string>
+     <string name="overlay_added">تمت الإضافة إلى التنزيلات</string>
+     <string name="browser_video_found">فيديو في هذه الصفحة</string>
+diff --git a/android/app/src/main/res/values-de/strings.xml b/android/app/src/main/res/values-de/strings.xml
+new file mode 100644
+index 0000000..5c95419
+--- /dev/null
++++ b/android/app/src/main/res/values-de/strings.xml
+@@ -0,0 +1,105 @@
++<?xml version="1.0" encoding="utf-8"?>
++<resources>
++    <string name="app_name">Mister Download Manager</string>
++    <string name="channel_name">Downloads</string>
++    <string name="notification_summary">%1$d werden geladen · %2$s/s</string>
++
++    <!-- Main list -->
++    <string name="tab_all">Alle</string>
++    <string name="tab_active">Aktiv</string>
++    <string name="tab_completed">Abgeschlossen</string>
++    <string name="menu_browser">Browser</string>
++    <string name="menu_pause_all">Alle pausieren</string>
++    <string name="menu_resume_all">Alle fortsetzen</string>
++    <string name="menu_clear_completed">Abgeschlossene entfernen</string>
++    <string name="menu_settings">Einstellungen</string>
++    <string name="search">Suchen</string>
++    <string name="search_hint">Downloads durchsuchen</string>
++    <string name="back">Zurück</string>
++    <string name="add_title">Download hinzufügen</string>
++    <string name="add_hint">Link</string>
++    <string name="add_video">Dies ist eine Videoseite (YouTube und andere)</string>
++    <string name="add_button">Herunterladen</string>
++    <string name="cancel">Abbrechen</string>
++    <string name="ok">OK</string>
++    <string name="empty_all">Noch keine Downloads. Tippe auf + und füge einen Link ein, oder öffne den Browser über das Menü.</string>
++    <string name="empty_active">Es wird nichts heruntergeladen.</string>
++    <string name="empty_completed">Noch keine abgeschlossenen Downloads.</string>
++    <string name="pause">Pausieren</string>
++    <string name="resume">Fortsetzen</string>
++    <string name="open">Öffnen</string>
++    <string name="share">Teilen</string>
++    <string name="copy_link">Link kopieren</string>
++    <string name="link_copied">Link kopiert</string>
++    <string name="cannot_open">Keine App kann diese Datei öffnen</string>
++    <string name="remove">Entfernen</string>
++    <string name="remove_with_file">Entfernen und Datei löschen</string>
++    <string name="status_queued">Wartet…</string>
++    <string name="status_running">Wird geladen</string>
++    <string name="status_paused">Pausiert</string>
++    <string name="status_done">Fertig</string>
++    <string name="status_failed">Fehlgeschlagen</string>
++    <string name="of_size">%1$s von %2$s</string>
++    <string name="eta_seconds">noch %1$d s</string>
++    <string name="eta_minutes">noch %1$d Min.</string>
++    <string name="eta_hours">noch %1$d Std. %2$d Min.</string>
++    <string name="saved_in">Gespeichert in: %1$s</string>
++
++    <!-- Speed modes -->
++    <string name="speed_title">Geschwindigkeitsmodus</string>
++    <string name="mode_fast">Schneller Modus</string>
++    <string name="mode_moderate">Moderater Modus</string>
++    <string name="mode_slow">Langsamer Modus</string>
++    <string name="mode_snail">Schneckenmodus</string>
++    <string name="speed_desc_unlimited">Unbegrenzt · bis zu %1$d Downloads gleichzeitig</string>
++    <string name="speed_desc_limit">%1$s/s · bis zu %2$d Downloads gleichzeitig</string>
++    <string name="snail_title">Schneckenmodus</string>
++    <string name="snail_desc">Gibt Bandbreite frei, ohne die Downloads zu stoppen</string>
++
++    <!-- Video found: floating window and browser -->
++    <string name="overlay_found">Dieses Video herunterladen?</string>
++    <string name="overlay_download">Herunterladen</string>
++    <string name="overlay_added">Zu den Downloads hinzugefügt</string>
++    <string name="browser_video_found">Video auf dieser Seite</string>
++    <string name="browser_media_found">%1$d Mediendateien gefunden</string>
++    <string name="browser_pick_media">Datei auswählen</string>
++
++    <!-- Settings -->
++    <string name="settings_title">Einstellungen</string>
++    <string name="settings_video">Videoerkennung</string>
++    <string name="overlay_switch">Schwebendes Fenster, wenn ein Video gefunden wird</string>
++    <string name="overlay_switch_desc">Zeigt eine Schaltfläche „Herunterladen“ über anderen Apps an. Du kannst sie jederzeit ausschalten.</string>
++    <string name="overlay_needs_permission">Dafür wird die Berechtigung zum Einblenden über anderen Apps benötigt.</string>
++    <string name="settings_speed">Geschwindigkeit</string>
++    <string name="settings_appearance">Darstellung</string>
++    <string name="theme_system">Wie das Telefon</string>
++    <string name="theme_light">Hell</string>
++    <string name="theme_dark">Dunkel</string>
++    <string name="settings_permissions">Berechtigungen</string>
++    <string name="settings_permissions_open">Berechtigungen prüfen</string>
++    <string name="settings_storage">Speicherort der Dateien</string>
++    <string name="settings_storage_public">Der Ordner Download/MDM</string>
++    <string name="settings_about">Über</string>
++
++    <!-- Permissions screen -->
++    <string name="perm_title">Damit die App optimal funktioniert</string>
++    <string name="perm_subtitle">Erlaube, was du möchtest. Alles wird erklärt, und du kannst es später ändern.</string>
++    <string name="perm_notifications_title">Benachrichtigungen</string>
++    <string name="perm_notifications_why">Zeigt den Fortschritt deiner Downloads an und lässt dich sie über die Benachrichtigung steuern.</string>
++    <string name="perm_overlay_title">Über anderen Apps einblenden</string>
++    <string name="perm_overlay_why">Lässt die Schaltfläche „Herunterladen“ über deinem Browser erscheinen, sobald ein Video gefunden wird.</string>
++    <string name="perm_battery_title">Im Hintergrund ausführen</string>
++    <string name="perm_battery_why">Verhindert, dass Android lange Downloads bei ausgeschaltetem Bildschirm pausiert.</string>
++    <string name="perm_accessibility_title">Erkennung von Videolinks</string>
++    <string name="perm_accessibility_why">Optional. Lässt die App die Adressleiste deines Browsers lesen (nur die Adresse, sonst nichts), um Videoseiten in jedem Browser zu erkennen. Aktiviere in den Bedienungshilfen Mister Download Manager.</string>
++    <string name="perm_storage_title">Speicher</string>
++    <string name="perm_storage_why">Speichert deine Dateien im Ordner Download (nur Android 8 und 9).</string>
++    <string name="perm_allow">Erlauben</string>
++    <string name="perm_granted">Erlaubt</string>
++    <string name="perm_optional">Optional</string>
++    <string name="perm_continue">Weiter</string>
++
++    <!-- Accessibility service -->
++    <string name="watcher_label">Linkerkennung von Mister Download Manager</string>
++    <string name="watcher_description">Liest die Adressleiste von Browsern, um das Herunterladen von Videos anzubieten. Der Seiteninhalt wird nicht gelesen.</string>
++</resources>
+diff --git a/android/app/src/main/res/values-es/strings.xml b/android/app/src/main/res/values-es/strings.xml
+new file mode 100644
+index 0000000..96718dd
+--- /dev/null
++++ b/android/app/src/main/res/values-es/strings.xml
+@@ -0,0 +1,105 @@
++<?xml version="1.0" encoding="utf-8"?>
++<resources>
++    <string name="app_name">Mister Download Manager</string>
++    <string name="channel_name">Descargas</string>
++    <string name="notification_summary">%1$d descargando · %2$s/s</string>
++
++    <!-- Main list -->
++    <string name="tab_all">Todas</string>
++    <string name="tab_active">Activas</string>
++    <string name="tab_completed">Completadas</string>
++    <string name="menu_browser">Navegador</string>
++    <string name="menu_pause_all">Pausar todo</string>
++    <string name="menu_resume_all">Reanudar todo</string>
++    <string name="menu_clear_completed">Borrar completadas</string>
++    <string name="menu_settings">Ajustes</string>
++    <string name="search">Buscar</string>
++    <string name="search_hint">Buscar descargas</string>
++    <string name="back">Atrás</string>
++    <string name="add_title">Añadir una descarga</string>
++    <string name="add_hint">Enlace</string>
++    <string name="add_video">Es una página de vídeo (YouTube y otras)</string>
++    <string name="add_button">Descargar</string>
++    <string name="cancel">Cancelar</string>
++    <string name="ok">Aceptar</string>
++    <string name="empty_all">Aún no hay descargas. Toca + y pega un enlace, o abre el navegador desde el menú.</string>
++    <string name="empty_active">No se está descargando nada.</string>
++    <string name="empty_completed">Aún no hay descargas terminadas.</string>
++    <string name="pause">Pausar</string>
++    <string name="resume">Reanudar</string>
++    <string name="open">Abrir</string>
++    <string name="share">Compartir</string>
++    <string name="copy_link">Copiar enlace</string>
++    <string name="link_copied">Enlace copiado</string>
++    <string name="cannot_open">Ninguna aplicación puede abrir este archivo</string>
++    <string name="remove">Quitar</string>
++    <string name="remove_with_file">Quitar y eliminar el archivo</string>
++    <string name="status_queued">En espera…</string>
++    <string name="status_running">Descargando</string>
++    <string name="status_paused">En pausa</string>
++    <string name="status_done">Terminada</string>
++    <string name="status_failed">Fallida</string>
++    <string name="of_size">%1$s de %2$s</string>
++    <string name="eta_seconds">Faltan %1$d s</string>
++    <string name="eta_minutes">Faltan %1$d min</string>
++    <string name="eta_hours">Faltan %1$d h %2$d min</string>
++    <string name="saved_in">Guardado en: %1$s</string>
++
++    <!-- Speed modes -->
++    <string name="speed_title">Modo de velocidad</string>
++    <string name="mode_fast">Modo rápido</string>
++    <string name="mode_moderate">Modo moderado</string>
++    <string name="mode_slow">Modo lento</string>
++    <string name="mode_snail">Modo caracol</string>
++    <string name="speed_desc_unlimited">Sin límite · hasta %1$d descargas a la vez</string>
++    <string name="speed_desc_limit">%1$s/s · hasta %2$d descargas a la vez</string>
++    <string name="snail_title">Modo caracol</string>
++    <string name="snail_desc">Libera tu ancho de banda sin detener las descargas</string>
++
++    <!-- Video found: floating window and browser -->
++    <string name="overlay_found">¿Descargar este vídeo?</string>
++    <string name="overlay_download">Descargar</string>
++    <string name="overlay_added">Añadido a las descargas</string>
++    <string name="browser_video_found">Vídeo en esta página</string>
++    <string name="browser_media_found">%1$d archivos multimedia encontrados</string>
++    <string name="browser_pick_media">Elige un archivo</string>
++
++    <!-- Settings -->
++    <string name="settings_title">Ajustes</string>
++    <string name="settings_video">Detección de vídeo</string>
++    <string name="overlay_switch">Ventana flotante al encontrar un vídeo</string>
++    <string name="overlay_switch_desc">Muestra un botón Descargar sobre otras aplicaciones. Puedes desactivarlo cuando quieras.</string>
++    <string name="overlay_needs_permission">Esto requiere el permiso para mostrar sobre otras aplicaciones.</string>
++    <string name="settings_speed">Velocidad</string>
++    <string name="settings_appearance">Apariencia</string>
++    <string name="theme_system">Seguir al teléfono</string>
++    <string name="theme_light">Claro</string>
++    <string name="theme_dark">Oscuro</string>
++    <string name="settings_permissions">Permisos</string>
++    <string name="settings_permissions_open">Revisar permisos</string>
++    <string name="settings_storage">Dónde se guardan los archivos</string>
++    <string name="settings_storage_public">La carpeta Download/MDM</string>
++    <string name="settings_about">Acerca de</string>
++
++    <!-- Permissions screen -->
++    <string name="perm_title">Deja que la app funcione al máximo</string>
++    <string name="perm_subtitle">Permite lo que quieras. Cada permiso está explicado y puedes cambiarlos más tarde.</string>
++    <string name="perm_notifications_title">Notificaciones</string>
++    <string name="perm_notifications_why">Muestra el progreso de tus descargas y te permite controlarlas desde la notificación.</string>
++    <string name="perm_overlay_title">Mostrar sobre otras aplicaciones</string>
++    <string name="perm_overlay_why">Hace que el botón Descargar aparezca sobre tu navegador en cuanto se encuentra un vídeo.</string>
++    <string name="perm_battery_title">Ejecutar en segundo plano</string>
++    <string name="perm_battery_why">Evita que Android suspenda las descargas largas cuando la pantalla está apagada.</string>
++    <string name="perm_accessibility_title">Detección de enlaces de vídeo</string>
++    <string name="perm_accessibility_why">Opcional. Permite que la app lea la barra de direcciones de tu navegador (solo la dirección, nada más) para reconocer páginas de vídeo en cualquier navegador. En los ajustes de Accesibilidad, activa Mister Download Manager.</string>
++    <string name="perm_storage_title">Almacenamiento</string>
++    <string name="perm_storage_why">Guarda tus archivos en la carpeta Download (solo Android 8 y 9).</string>
++    <string name="perm_allow">Permitir</string>
++    <string name="perm_granted">Permitido</string>
++    <string name="perm_optional">Opcional</string>
++    <string name="perm_continue">Continuar</string>
++
++    <!-- Accessibility service -->
++    <string name="watcher_label">Detección de enlaces de Mister Download Manager</string>
++    <string name="watcher_description">Lee la barra de direcciones de los navegadores para ofrecer la descarga de vídeos. No lee el contenido de las páginas.</string>
++</resources>
+diff --git a/android/app/src/main/res/values-fa/strings.xml b/android/app/src/main/res/values-fa/strings.xml
+new file mode 100644
+index 0000000..1766b9c
+--- /dev/null
++++ b/android/app/src/main/res/values-fa/strings.xml
+@@ -0,0 +1,105 @@
++<?xml version="1.0" encoding="utf-8"?>
++<resources>
++    <string name="app_name">Mister Download Manager</string>
++    <string name="channel_name">دانلودها</string>
++    <string name="notification_summary">%1$d در حال دانلود · %2$s/s</string>
++
++    <!-- Main list -->
++    <string name="tab_all">همه</string>
++    <string name="tab_active">فعال</string>
++    <string name="tab_completed">کامل‌شده</string>
++    <string name="menu_browser">مرورگر</string>
++    <string name="menu_pause_all">توقف همه</string>
++    <string name="menu_resume_all">ادامه همه</string>
++    <string name="menu_clear_completed">پاک کردن کامل‌شده‌ها</string>
++    <string name="menu_settings">تنظیمات</string>
++    <string name="search">جستجو</string>
++    <string name="search_hint">جستجو در دانلودها</string>
++    <string name="back">بازگشت</string>
++    <string name="add_title">افزودن دانلود</string>
++    <string name="add_hint">پیوند</string>
++    <string name="add_video">این یک صفحهٔ ویدیو است (یوتیوب و غیره)</string>
++    <string name="add_button">دانلود</string>
++    <string name="cancel">لغو</string>
++    <string name="ok">تأیید</string>
++    <string name="empty_all">هنوز دانلودی وجود ندارد. روی + بزنید و یک پیوند بچسبانید، یا مرورگر را از منو باز کنید.</string>
++    <string name="empty_active">هیچ دانلودی در حال انجام نیست.</string>
++    <string name="empty_completed">هنوز دانلود کامل‌شده‌ای وجود ندارد.</string>
++    <string name="pause">توقف</string>
++    <string name="resume">ادامه</string>
++    <string name="open">باز کردن</string>
++    <string name="share">اشتراک‌گذاری</string>
++    <string name="copy_link">کپی پیوند</string>
++    <string name="link_copied">پیوند کپی شد</string>
++    <string name="cannot_open">هیچ برنامه‌ای نمی‌تواند این فایل را باز کند</string>
++    <string name="remove">حذف</string>
++    <string name="remove_with_file">حذف و پاک کردن فایل</string>
++    <string name="status_queued">در انتظار…</string>
++    <string name="status_running">در حال دانلود</string>
++    <string name="status_paused">متوقف شد</string>
++    <string name="status_done">تمام شد</string>
++    <string name="status_failed">ناموفق</string>
++    <string name="of_size">%1$s از %2$s</string>
++    <string name="eta_seconds">%1$d ثانیه مانده</string>
++    <string name="eta_minutes">%1$d دقیقه مانده</string>
++    <string name="eta_hours">%1$d ساعت و %2$d دقیقه مانده</string>
++    <string name="saved_in">ذخیره شد در: %1$s</string>
++
++    <!-- Speed modes -->
++    <string name="speed_title">حالت سرعت</string>
++    <string name="mode_fast">حالت سریع</string>
++    <string name="mode_moderate">حالت متوسط</string>
++    <string name="mode_slow">حالت آهسته</string>
++    <string name="mode_snail">حالت حلزونی</string>
++    <string name="speed_desc_unlimited">بدون محدودیت · تا %1$d دانلود همزمان</string>
++    <string name="speed_desc_limit">%1$s/s · تا %2$d دانلود همزمان</string>
++    <string name="snail_title">حالت حلزونی</string>
++    <string name="snail_desc">پهنای باند شما را بدون توقف دانلودها آزاد می‌کند</string>
++
++    <!-- Video found: floating window and browser -->
++    <string name="overlay_found">این ویدیو دانلود شود؟</string>
++    <string name="overlay_download">دانلود</string>
++    <string name="overlay_added">به دانلودها اضافه شد</string>
++    <string name="browser_video_found">ویدیو در این صفحه</string>
++    <string name="browser_media_found">%1$d فایل رسانه‌ای پیدا شد</string>
++    <string name="browser_pick_media">یک فایل انتخاب کنید</string>
++
++    <!-- Settings -->
++    <string name="settings_title">تنظیمات</string>
++    <string name="settings_video">تشخیص ویدیو</string>
++    <string name="overlay_switch">پنجرهٔ شناور هنگام پیدا شدن ویدیو</string>
++    <string name="overlay_switch_desc">دکمهٔ دانلود را روی برنامه‌های دیگر نشان می‌دهد. هر زمان بخواهید می‌توانید آن را خاموش کنید.</string>
++    <string name="overlay_needs_permission">این قابلیت به مجوز نمایش روی برنامه‌های دیگر نیاز دارد.</string>
++    <string name="settings_speed">سرعت</string>
++    <string name="settings_appearance">ظاهر</string>
++    <string name="theme_system">مطابق گوشی</string>
++    <string name="theme_light">روشن</string>
++    <string name="theme_dark">تاریک</string>
++    <string name="settings_permissions">مجوزها</string>
++    <string name="settings_permissions_open">بررسی مجوزها</string>
++    <string name="settings_storage">محل ذخیرهٔ فایل‌ها</string>
++    <string name="settings_storage_public">پوشهٔ Download/MDM</string>
++    <string name="settings_about">دربارهٔ برنامه</string>
++
++    <!-- Permissions screen -->
++    <string name="perm_title">بگذارید برنامه به بهترین شکل کار کند</string>
++    <string name="perm_subtitle">هر چه می‌خواهید اجازه دهید. برای هر مورد توضیح داده شده و بعداً می‌توانید آن‌ها را تغییر دهید.</string>
++    <string name="perm_notifications_title">اعلان‌ها</string>
++    <string name="perm_notifications_why">پیشرفت دانلودهای شما را نشان می‌دهد و امکان کنترل آن‌ها را از اعلان فراهم می‌کند.</string>
++    <string name="perm_overlay_title">نمایش روی برنامه‌های دیگر</string>
++    <string name="perm_overlay_why">باعث می‌شود دکمهٔ دانلود به محض پیدا شدن ویدیو روی مرورگر شما ظاهر شود.</string>
++    <string name="perm_battery_title">اجرا در پس‌زمینه</string>
++    <string name="perm_battery_why">از به خواب رفتن دانلودهای طولانی توسط اندروید هنگام خاموش بودن صفحه جلوگیری می‌کند.</string>
++    <string name="perm_accessibility_title">تشخیص پیوند ویدیو</string>
++    <string name="perm_accessibility_why">اختیاری. به برنامه اجازه می‌دهد نوار آدرس مرورگر شما را بخواند (فقط آدرس، نه چیز دیگر) تا صفحه‌های ویدیو را در هر مرورگری تشخیص دهد. در تنظیمات دسترسی‌پذیری، Mister Download Manager را روشن کنید.</string>
++    <string name="perm_storage_title">حافظه</string>
++    <string name="perm_storage_why">فایل‌های شما را در پوشهٔ Download ذخیره می‌کند (فقط اندروید ۸ و ۹).</string>
++    <string name="perm_allow">اجازه دادن</string>
++    <string name="perm_granted">مجاز</string>
++    <string name="perm_optional">اختیاری</string>
++    <string name="perm_continue">ادامه</string>
++
++    <!-- Accessibility service -->
++    <string name="watcher_label">تشخیص پیوند Mister Download Manager</string>
++    <string name="watcher_description">نوار آدرس مرورگرها را می‌خواند تا دانلود ویدیو را پیشنهاد دهد. محتوای صفحه را نمی‌خواند.</string>
++</resources>
+diff --git a/android/app/src/main/res/values-fr/strings.xml b/android/app/src/main/res/values-fr/strings.xml
+new file mode 100644
+index 0000000..f2188ad
+--- /dev/null
++++ b/android/app/src/main/res/values-fr/strings.xml
+@@ -0,0 +1,105 @@
++<?xml version="1.0" encoding="utf-8"?>
++<resources>
++    <string name="app_name">Mister Download Manager</string>
++    <string name="channel_name">Téléchargements</string>
++    <string name="notification_summary">%1$d en cours · %2$s/s</string>
++
++    <!-- Main list -->
++    <string name="tab_all">Tous</string>
++    <string name="tab_active">Actifs</string>
++    <string name="tab_completed">Terminés</string>
++    <string name="menu_browser">Navigateur</string>
++    <string name="menu_pause_all">Tout mettre en pause</string>
++    <string name="menu_resume_all">Tout reprendre</string>
++    <string name="menu_clear_completed">Effacer les terminés</string>
++    <string name="menu_settings">Paramètres</string>
++    <string name="search">Rechercher</string>
++    <string name="search_hint">Rechercher dans les téléchargements</string>
++    <string name="back">Retour</string>
++    <string name="add_title">Ajouter un téléchargement</string>
++    <string name="add_hint">Lien</string>
++    <string name="add_video">Ceci est une page vidéo (YouTube et autres)</string>
++    <string name="add_button">Télécharger</string>
++    <string name="cancel">Annuler</string>
++    <string name="ok">OK</string>
++    <string name="empty_all">Aucun téléchargement pour l\'instant. Touchez + et collez un lien, ou ouvrez le navigateur depuis le menu.</string>
++    <string name="empty_active">Aucun téléchargement en cours.</string>
++    <string name="empty_completed">Aucun téléchargement terminé pour l\'instant.</string>
++    <string name="pause">Pause</string>
++    <string name="resume">Reprendre</string>
++    <string name="open">Ouvrir</string>
++    <string name="share">Partager</string>
++    <string name="copy_link">Copier le lien</string>
++    <string name="link_copied">Lien copié</string>
++    <string name="cannot_open">Aucune application ne peut ouvrir ce fichier</string>
++    <string name="remove">Retirer</string>
++    <string name="remove_with_file">Retirer et supprimer le fichier</string>
++    <string name="status_queued">En attente…</string>
++    <string name="status_running">Téléchargement</string>
++    <string name="status_paused">En pause</string>
++    <string name="status_done">Terminé</string>
++    <string name="status_failed">Échec</string>
++    <string name="of_size">%1$s sur %2$s</string>
++    <string name="eta_seconds">%1$d s restantes</string>
++    <string name="eta_minutes">%1$d min restantes</string>
++    <string name="eta_hours">%1$d h %2$d min restantes</string>
++    <string name="saved_in">Enregistré dans : %1$s</string>
++
++    <!-- Speed modes -->
++    <string name="speed_title">Mode de vitesse</string>
++    <string name="mode_fast">Mode rapide</string>
++    <string name="mode_moderate">Mode modéré</string>
++    <string name="mode_slow">Mode lent</string>
++    <string name="mode_snail">Mode escargot</string>
++    <string name="speed_desc_unlimited">Sans limite · jusqu\'à %1$d téléchargements simultanés</string>
++    <string name="speed_desc_limit">%1$s/s · jusqu\'à %2$d téléchargements simultanés</string>
++    <string name="snail_title">Mode escargot</string>
++    <string name="snail_desc">Libère votre bande passante sans arrêter les téléchargements</string>
++
++    <!-- Video found: floating window and browser -->
++    <string name="overlay_found">Télécharger cette vidéo ?</string>
++    <string name="overlay_download">Télécharger</string>
++    <string name="overlay_added">Ajouté aux téléchargements</string>
++    <string name="browser_video_found">Vidéo sur cette page</string>
++    <string name="browser_media_found">%1$d fichiers multimédias trouvés</string>
++    <string name="browser_pick_media">Choisir un fichier</string>
++
++    <!-- Settings -->
++    <string name="settings_title">Paramètres</string>
++    <string name="settings_video">Détection des vidéos</string>
++    <string name="overlay_switch">Fenêtre flottante quand une vidéo est trouvée</string>
++    <string name="overlay_switch_desc">Affiche un bouton Télécharger par-dessus les autres applications. Vous pouvez le désactiver à tout moment.</string>
++    <string name="overlay_needs_permission">Cela nécessite l\'autorisation d\'afficher par-dessus les autres applications.</string>
++    <string name="settings_speed">Vitesse</string>
++    <string name="settings_appearance">Apparence</string>
++    <string name="theme_system">Suivre le téléphone</string>
++    <string name="theme_light">Clair</string>
++    <string name="theme_dark">Sombre</string>
++    <string name="settings_permissions">Autorisations</string>
++    <string name="settings_permissions_open">Vérifier les autorisations</string>
++    <string name="settings_storage">Emplacement des fichiers</string>
++    <string name="settings_storage_public">Le dossier Download/MDM</string>
++    <string name="settings_about">À propos</string>
++
++    <!-- Permissions screen -->
++    <string name="perm_title">Laissez l\'application fonctionner au mieux</string>
++    <string name="perm_subtitle">Autorisez ce que vous voulez. Chaque option est expliquée et vous pourrez les modifier plus tard.</string>
++    <string name="perm_notifications_title">Notifications</string>
++    <string name="perm_notifications_why">Affiche la progression de vos téléchargements et vous permet de les contrôler depuis la notification.</string>
++    <string name="perm_overlay_title">Affichage par-dessus les autres applications</string>
++    <string name="perm_overlay_why">Permet au bouton Télécharger d\'apparaître au-dessus de votre navigateur dès qu\'une vidéo est trouvée.</string>
++    <string name="perm_battery_title">Exécution en arrière-plan</string>
++    <string name="perm_battery_why">Empêche Android de mettre en veille les longs téléchargements lorsque l\'écran est éteint.</string>
++    <string name="perm_accessibility_title">Détection des liens vidéo</string>
++    <string name="perm_accessibility_why">Facultatif. Permet à l\'application de lire la barre d\'adresse de votre navigateur (uniquement l\'adresse, rien d\'autre) pour repérer les pages vidéo dans n\'importe quel navigateur. Dans les paramètres d\'accessibilité, activez Mister Download Manager.</string>
++    <string name="perm_storage_title">Stockage</string>
++    <string name="perm_storage_why">Enregistre vos fichiers dans le dossier Download (Android 8 et 9 uniquement).</string>
++    <string name="perm_allow">Autoriser</string>
++    <string name="perm_granted">Autorisé</string>
++    <string name="perm_optional">Facultatif</string>
++    <string name="perm_continue">Continuer</string>
++
++    <!-- Accessibility service -->
++    <string name="watcher_label">Détection des liens de Mister Download Manager</string>
++    <string name="watcher_description">Lit la barre d\'adresse des navigateurs pour proposer de télécharger des vidéos. Ne lit pas le contenu des pages.</string>
++</resources>
+diff --git a/android/app/src/main/res/values-in/strings.xml b/android/app/src/main/res/values-in/strings.xml
+new file mode 100644
+index 0000000..25c6a84
+--- /dev/null
++++ b/android/app/src/main/res/values-in/strings.xml
+@@ -0,0 +1,105 @@
++<?xml version="1.0" encoding="utf-8"?>
++<resources>
++    <string name="app_name">Mister Download Manager</string>
++    <string name="channel_name">Unduhan</string>
++    <string name="notification_summary">%1$d sedang diunduh · %2$s/dtk</string>
++
++    <!-- Main list -->
++    <string name="tab_all">Semua</string>
++    <string name="tab_active">Aktif</string>
++    <string name="tab_completed">Selesai</string>
++    <string name="menu_browser">Browser</string>
++    <string name="menu_pause_all">Jeda semua</string>
++    <string name="menu_resume_all">Lanjutkan semua</string>
++    <string name="menu_clear_completed">Hapus yang selesai</string>
++    <string name="menu_settings">Pengaturan</string>
++    <string name="search">Cari</string>
++    <string name="search_hint">Cari unduhan</string>
++    <string name="back">Kembali</string>
++    <string name="add_title">Tambah unduhan</string>
++    <string name="add_hint">Tautan</string>
++    <string name="add_video">Ini halaman video (YouTube dan lainnya)</string>
++    <string name="add_button">Unduh</string>
++    <string name="cancel">Batal</string>
++    <string name="ok">OK</string>
++    <string name="empty_all">Belum ada unduhan. Ketuk + lalu tempel tautan, atau buka browser dari menu.</string>
++    <string name="empty_active">Tidak ada yang sedang diunduh.</string>
++    <string name="empty_completed">Belum ada unduhan yang selesai.</string>
++    <string name="pause">Jeda</string>
++    <string name="resume">Lanjutkan</string>
++    <string name="open">Buka</string>
++    <string name="share">Bagikan</string>
++    <string name="copy_link">Salin tautan</string>
++    <string name="link_copied">Tautan disalin</string>
++    <string name="cannot_open">Tidak ada aplikasi yang dapat membuka file ini</string>
++    <string name="remove">Hapus</string>
++    <string name="remove_with_file">Hapus beserta filenya</string>
++    <string name="status_queued">Menunggu…</string>
++    <string name="status_running">Mengunduh</string>
++    <string name="status_paused">Dijeda</string>
++    <string name="status_done">Selesai</string>
++    <string name="status_failed">Gagal</string>
++    <string name="of_size">%1$s dari %2$s</string>
++    <string name="eta_seconds">Sisa %1$d dtk</string>
++    <string name="eta_minutes">Sisa %1$d mnt</string>
++    <string name="eta_hours">Sisa %1$d j %2$d mnt</string>
++    <string name="saved_in">Disimpan di: %1$s</string>
++
++    <!-- Speed modes -->
++    <string name="speed_title">Mode kecepatan</string>
++    <string name="mode_fast">Mode cepat</string>
++    <string name="mode_moderate">Mode sedang</string>
++    <string name="mode_slow">Mode lambat</string>
++    <string name="mode_snail">Mode siput</string>
++    <string name="speed_desc_unlimited">Tanpa batas · hingga %1$d unduhan sekaligus</string>
++    <string name="speed_desc_limit">%1$s/dtk · hingga %2$d unduhan sekaligus</string>
++    <string name="snail_title">Mode siput</string>
++    <string name="snail_desc">Melonggarkan bandwidth Anda tanpa menghentikan unduhan</string>
++
++    <!-- Video found: floating window and browser -->
++    <string name="overlay_found">Unduh video ini?</string>
++    <string name="overlay_download">Unduh</string>
++    <string name="overlay_added">Ditambahkan ke unduhan</string>
++    <string name="browser_video_found">Video di halaman ini</string>
++    <string name="browser_media_found">%1$d file media ditemukan</string>
++    <string name="browser_pick_media">Pilih file</string>
++
++    <!-- Settings -->
++    <string name="settings_title">Pengaturan</string>
++    <string name="settings_video">Deteksi video</string>
++    <string name="overlay_switch">Jendela mengambang saat video ditemukan</string>
++    <string name="overlay_switch_desc">Menampilkan tombol Unduh di atas aplikasi lain. Anda dapat mematikannya kapan saja.</string>
++    <string name="overlay_needs_permission">Ini memerlukan izin untuk tampil di atas aplikasi lain.</string>
++    <string name="settings_speed">Kecepatan</string>
++    <string name="settings_appearance">Tampilan</string>
++    <string name="theme_system">Ikuti ponsel</string>
++    <string name="theme_light">Terang</string>
++    <string name="theme_dark">Gelap</string>
++    <string name="settings_permissions">Izin</string>
++    <string name="settings_permissions_open">Tinjau izin</string>
++    <string name="settings_storage">Lokasi penyimpanan file</string>
++    <string name="settings_storage_public">Folder Download/MDM</string>
++    <string name="settings_about">Tentang</string>
++
++    <!-- Permissions screen -->
++    <string name="perm_title">Agar aplikasi bekerja optimal</string>
++    <string name="perm_subtitle">Izinkan sesuai keinginan Anda. Setiap izin dijelaskan, dan dapat diubah nanti.</string>
++    <string name="perm_notifications_title">Notifikasi</string>
++    <string name="perm_notifications_why">Menampilkan kemajuan unduhan dan memungkinkan Anda mengendalikannya dari notifikasi.</string>
++    <string name="perm_overlay_title">Tampil di atas aplikasi lain</string>
++    <string name="perm_overlay_why">Membuat tombol Unduh muncul di atas browser begitu video ditemukan.</string>
++    <string name="perm_battery_title">Berjalan di latar belakang</string>
++    <string name="perm_battery_why">Mencegah Android menidurkan unduhan yang lama saat layar mati.</string>
++    <string name="perm_accessibility_title">Deteksi tautan video</string>
++    <string name="perm_accessibility_why">Opsional. Memungkinkan aplikasi membaca bilah alamat browser Anda (hanya alamatnya, tidak yang lain) untuk mengenali halaman video di browser mana pun. Di pengaturan Aksesibilitas, aktifkan Mister Download Manager.</string>
++    <string name="perm_storage_title">Penyimpanan</string>
++    <string name="perm_storage_why">Menyimpan file Anda di folder Download (hanya Android 8 dan 9).</string>
++    <string name="perm_allow">Izinkan</string>
++    <string name="perm_granted">Diizinkan</string>
++    <string name="perm_optional">Opsional</string>
++    <string name="perm_continue">Lanjutkan</string>
++
++    <!-- Accessibility service -->
++    <string name="watcher_label">Deteksi tautan Mister Download Manager</string>
++    <string name="watcher_description">Membaca bilah alamat browser untuk menawarkan pengunduhan video. Tidak membaca isi halaman.</string>
++</resources>
+diff --git a/android/app/src/main/res/values-ru/strings.xml b/android/app/src/main/res/values-ru/strings.xml
+new file mode 100644
+index 0000000..8fc9349
+--- /dev/null
++++ b/android/app/src/main/res/values-ru/strings.xml
+@@ -0,0 +1,105 @@
++<?xml version="1.0" encoding="utf-8"?>
++<resources>
++    <string name="app_name">Mister Download Manager</string>
++    <string name="channel_name">Загрузки</string>
++    <string name="notification_summary">Загружается: %1$d · %2$s/с</string>
++
++    <!-- Main list -->
++    <string name="tab_all">Все</string>
++    <string name="tab_active">Активные</string>
++    <string name="tab_completed">Завершённые</string>
++    <string name="menu_browser">Браузер</string>
++    <string name="menu_pause_all">Приостановить все</string>
++    <string name="menu_resume_all">Возобновить все</string>
++    <string name="menu_clear_completed">Очистить завершённые</string>
++    <string name="menu_settings">Настройки</string>
++    <string name="search">Поиск</string>
++    <string name="search_hint">Поиск загрузок</string>
++    <string name="back">Назад</string>
++    <string name="add_title">Добавить загрузку</string>
++    <string name="add_hint">Ссылка</string>
++    <string name="add_video">Это страница с видео (YouTube и другие)</string>
++    <string name="add_button">Скачать</string>
++    <string name="cancel">Отмена</string>
++    <string name="ok">ОК</string>
++    <string name="empty_all">Загрузок пока нет. Нажмите + и вставьте ссылку или откройте браузер из меню.</string>
++    <string name="empty_active">Сейчас ничего не загружается.</string>
++    <string name="empty_completed">Завершённых загрузок пока нет.</string>
++    <string name="pause">Пауза</string>
++    <string name="resume">Продолжить</string>
++    <string name="open">Открыть</string>
++    <string name="share">Поделиться</string>
++    <string name="copy_link">Копировать ссылку</string>
++    <string name="link_copied">Ссылка скопирована</string>
++    <string name="cannot_open">Нет приложения для открытия этого файла</string>
++    <string name="remove">Удалить</string>
++    <string name="remove_with_file">Удалить вместе с файлом</string>
++    <string name="status_queued">Ожидание…</string>
++    <string name="status_running">Загрузка</string>
++    <string name="status_paused">Приостановлено</string>
++    <string name="status_done">Завершено</string>
++    <string name="status_failed">Ошибка</string>
++    <string name="of_size">%1$s из %2$s</string>
++    <string name="eta_seconds">Осталось %1$d с</string>
++    <string name="eta_minutes">Осталось %1$d мин</string>
++    <string name="eta_hours">Осталось %1$d ч %2$d мин</string>
++    <string name="saved_in">Сохранено в: %1$s</string>
++
++    <!-- Speed modes -->
++    <string name="speed_title">Режим скорости</string>
++    <string name="mode_fast">Быстрый режим</string>
++    <string name="mode_moderate">Умеренный режим</string>
++    <string name="mode_slow">Медленный режим</string>
++    <string name="mode_snail">Режим улитки</string>
++    <string name="speed_desc_unlimited">Без ограничений · загрузок одновременно: до %1$d</string>
++    <string name="speed_desc_limit">%1$s/с · загрузок одновременно: до %2$d</string>
++    <string name="snail_title">Режим улитки</string>
++    <string name="snail_desc">Освобождает канал, не останавливая загрузки</string>
++
++    <!-- Video found: floating window and browser -->
++    <string name="overlay_found">Скачать это видео?</string>
++    <string name="overlay_download">Скачать</string>
++    <string name="overlay_added">Добавлено в загрузки</string>
++    <string name="browser_video_found">Видео на этой странице</string>
++    <string name="browser_media_found">Найдено медиафайлов: %1$d</string>
++    <string name="browser_pick_media">Выберите файл</string>
++
++    <!-- Settings -->
++    <string name="settings_title">Настройки</string>
++    <string name="settings_video">Обнаружение видео</string>
++    <string name="overlay_switch">Плавающее окно при обнаружении видео</string>
++    <string name="overlay_switch_desc">Показывает кнопку «Скачать» поверх других приложений. Это можно отключить в любой момент.</string>
++    <string name="overlay_needs_permission">Для этого нужно разрешение на показ поверх других приложений.</string>
++    <string name="settings_speed">Скорость</string>
++    <string name="settings_appearance">Оформление</string>
++    <string name="theme_system">Как в телефоне</string>
++    <string name="theme_light">Светлая</string>
++    <string name="theme_dark">Тёмная</string>
++    <string name="settings_permissions">Разрешения</string>
++    <string name="settings_permissions_open">Проверить разрешения</string>
++    <string name="settings_storage">Куда сохраняются файлы</string>
++    <string name="settings_storage_public">Папка Download/MDM</string>
++    <string name="settings_about">О приложении</string>
++
++    <!-- Permissions screen -->
++    <string name="perm_title">Чтобы приложение работало лучше</string>
++    <string name="perm_subtitle">Разрешайте то, что считаете нужным. Каждое разрешение объяснено, и позже их можно изменить.</string>
++    <string name="perm_notifications_title">Уведомления</string>
++    <string name="perm_notifications_why">Показывают ход загрузок и позволяют управлять ими из уведомления.</string>
++    <string name="perm_overlay_title">Поверх других приложений</string>
++    <string name="perm_overlay_why">Позволяет кнопке «Скачать» появиться поверх браузера, как только найдено видео.</string>
++    <string name="perm_battery_title">Работа в фоне</string>
++    <string name="perm_battery_why">Не даёт Android усыплять долгие загрузки при выключенном экране.</string>
++    <string name="perm_accessibility_title">Обнаружение ссылок на видео</string>
++    <string name="perm_accessibility_why">Необязательно. Позволяет приложению читать адресную строку браузера (только адрес, больше ничего), чтобы замечать страницы с видео в любом браузере. В настройках специальных возможностей включите Mister Download Manager.</string>
++    <string name="perm_storage_title">Память</string>
++    <string name="perm_storage_why">Сохраняет файлы в папку Download (только Android 8 и 9).</string>
++    <string name="perm_allow">Разрешить</string>
++    <string name="perm_granted">Разрешено</string>
++    <string name="perm_optional">Необязательно</string>
++    <string name="perm_continue">Продолжить</string>
++
++    <!-- Accessibility service -->
++    <string name="watcher_label">Обнаружение ссылок Mister Download Manager</string>
++    <string name="watcher_description">Читает адресную строку браузеров, чтобы предложить скачать видео. Содержимое страниц не читается.</string>
++</resources>
+diff --git a/android/app/src/main/res/values-tr/strings.xml b/android/app/src/main/res/values-tr/strings.xml
+new file mode 100644
+index 0000000..0852dbd
+--- /dev/null
++++ b/android/app/src/main/res/values-tr/strings.xml
+@@ -0,0 +1,105 @@
++<?xml version="1.0" encoding="utf-8"?>
++<resources>
++    <string name="app_name">Mister Download Manager</string>
++    <string name="channel_name">İndirmeler</string>
++    <string name="notification_summary">%1$d indiriliyor · %2$s/sn</string>
++
++    <!-- Main list -->
++    <string name="tab_all">Tümü</string>
++    <string name="tab_active">Etkin</string>
++    <string name="tab_completed">Tamamlanan</string>
++    <string name="menu_browser">Tarayıcı</string>
++    <string name="menu_pause_all">Tümünü duraklat</string>
++    <string name="menu_resume_all">Tümünü sürdür</string>
++    <string name="menu_clear_completed">Tamamlananları temizle</string>
++    <string name="menu_settings">Ayarlar</string>
++    <string name="search">Ara</string>
++    <string name="search_hint">İndirmelerde ara</string>
++    <string name="back">Geri</string>
++    <string name="add_title">İndirme ekle</string>
++    <string name="add_hint">Bağlantı</string>
++    <string name="add_video">Bu bir video sayfası (YouTube ve diğerleri)</string>
++    <string name="add_button">İndir</string>
++    <string name="cancel">İptal</string>
++    <string name="ok">Tamam</string>
++    <string name="empty_all">Henüz indirme yok. + simgesine dokunup bir bağlantı yapıştırın ya da menüden tarayıcıyı açın.</string>
++    <string name="empty_active">İndirilen bir şey yok.</string>
++    <string name="empty_completed">Henüz biten indirme yok.</string>
++    <string name="pause">Duraklat</string>
++    <string name="resume">Sürdür</string>
++    <string name="open">Aç</string>
++    <string name="share">Paylaş</string>
++    <string name="copy_link">Bağlantıyı kopyala</string>
++    <string name="link_copied">Bağlantı kopyalandı</string>
++    <string name="cannot_open">Bu dosyayı açabilecek uygulama yok</string>
++    <string name="remove">Kaldır</string>
++    <string name="remove_with_file">Kaldır ve dosyayı sil</string>
++    <string name="status_queued">Bekleniyor…</string>
++    <string name="status_running">İndiriliyor</string>
++    <string name="status_paused">Duraklatıldı</string>
++    <string name="status_done">Bitti</string>
++    <string name="status_failed">Başarısız</string>
++    <string name="of_size">%1$s / %2$s</string>
++    <string name="eta_seconds">%1$d sn kaldı</string>
++    <string name="eta_minutes">%1$d dk kaldı</string>
++    <string name="eta_hours">%1$d sa %2$d dk kaldı</string>
++    <string name="saved_in">Kaydedildiği yer: %1$s</string>
++
++    <!-- Speed modes -->
++    <string name="speed_title">Hız modu</string>
++    <string name="mode_fast">Hızlı mod</string>
++    <string name="mode_moderate">Orta mod</string>
++    <string name="mode_slow">Yavaş mod</string>
++    <string name="mode_snail">Salyangoz modu</string>
++    <string name="speed_desc_unlimited">Sınırsız · aynı anda en fazla %1$d indirme</string>
++    <string name="speed_desc_limit">%1$s/sn · aynı anda en fazla %2$d indirme</string>
++    <string name="snail_title">Salyangoz modu</string>
++    <string name="snail_desc">İndirmeleri durdurmadan internet bant genişliğinizi boşaltır</string>
++
++    <!-- Video found: floating window and browser -->
++    <string name="overlay_found">Bu video indirilsin mi?</string>
++    <string name="overlay_download">İndir</string>
++    <string name="overlay_added">İndirmelere eklendi</string>
++    <string name="browser_video_found">Bu sayfada video var</string>
++    <string name="browser_media_found">%1$d medya dosyası bulundu</string>
++    <string name="browser_pick_media">Bir dosya seçin</string>
++
++    <!-- Settings -->
++    <string name="settings_title">Ayarlar</string>
++    <string name="settings_video">Video algılama</string>
++    <string name="overlay_switch">Video bulunduğunda yüzen pencere</string>
++    <string name="overlay_switch_desc">Diğer uygulamaların üzerinde bir İndir düğmesi gösterir. İstediğiniz zaman kapatabilirsiniz.</string>
++    <string name="overlay_needs_permission">Bunun için diğer uygulamaların üzerinde görüntüleme izni gerekir.</string>
++    <string name="settings_speed">Hız</string>
++    <string name="settings_appearance">Görünüm</string>
++    <string name="theme_system">Telefonu izle</string>
++    <string name="theme_light">Açık</string>
++    <string name="theme_dark">Koyu</string>
++    <string name="settings_permissions">İzinler</string>
++    <string name="settings_permissions_open">İzinleri gözden geçir</string>
++    <string name="settings_storage">Dosyaların kaydedildiği yer</string>
++    <string name="settings_storage_public">Download/MDM klasörü</string>
++    <string name="settings_about">Hakkında</string>
++
++    <!-- Permissions screen -->
++    <string name="perm_title">Uygulama en iyi şekilde çalışsın</string>
++    <string name="perm_subtitle">İstediklerinize izin verin. Her biri açıklanmıştır ve sonradan değiştirebilirsiniz.</string>
++    <string name="perm_notifications_title">Bildirimler</string>
++    <string name="perm_notifications_why">İndirmelerinizin ilerleyişini gösterir ve bildirimden denetlemenizi sağlar.</string>
++    <string name="perm_overlay_title">Diğer uygulamaların üzerinde görüntüle</string>
++    <string name="perm_overlay_why">Bir video bulunur bulunmaz İndir düğmesinin tarayıcınızın üzerinde görünmesini sağlar.</string>
++    <string name="perm_battery_title">Arka planda çalış</string>
++    <string name="perm_battery_why">Ekran kapalıyken Android\'in uzun indirmeleri uyku moduna almasını engeller.</string>
++    <string name="perm_accessibility_title">Video bağlantısı algılama</string>
++    <string name="perm_accessibility_why">İsteğe bağlı. Uygulamanın, herhangi bir tarayıcıda video sayfalarını fark etmek için tarayıcınızın adres çubuğunu (yalnızca adresi, başka hiçbir şeyi) okumasını sağlar. Erişilebilirlik ayarlarında Mister Download Manager\'ı açın.</string>
++    <string name="perm_storage_title">Depolama</string>
++    <string name="perm_storage_why">Dosyalarınızı Download klasörüne kaydeder (yalnızca Android 8 ve 9).</string>
++    <string name="perm_allow">İzin ver</string>
++    <string name="perm_granted">İzin verildi</string>
++    <string name="perm_optional">İsteğe bağlı</string>
++    <string name="perm_continue">Devam</string>
++
++    <!-- Accessibility service -->
++    <string name="watcher_label">Mister Download Manager bağlantı algılama</string>
++    <string name="watcher_description">Videoların indirilmesini önermek için tarayıcıların adres çubuğunu okur. Sayfa içeriğini okumaz.</string>
++</resources>
+diff --git a/android/app/src/main/res/values-ur/strings.xml b/android/app/src/main/res/values-ur/strings.xml
+new file mode 100644
+index 0000000..277aa79
+--- /dev/null
++++ b/android/app/src/main/res/values-ur/strings.xml
+@@ -0,0 +1,105 @@
++<?xml version="1.0" encoding="utf-8"?>
++<resources>
++    <string name="app_name">Mister Download Manager</string>
++    <string name="channel_name">ڈاؤن لوڈز</string>
++    <string name="notification_summary">%1$d ڈاؤن لوڈ ہو رہی ہیں · %2$s/s</string>
++
++    <!-- Main list -->
++    <string name="tab_all">سب</string>
++    <string name="tab_active">فعال</string>
++    <string name="tab_completed">مکمل</string>
++    <string name="menu_browser">براؤزر</string>
++    <string name="menu_pause_all">سب روکیں</string>
++    <string name="menu_resume_all">سب جاری کریں</string>
++    <string name="menu_clear_completed">مکمل شدہ صاف کریں</string>
++    <string name="menu_settings">ترتیبات</string>
++    <string name="search">تلاش</string>
++    <string name="search_hint">ڈاؤن لوڈز میں تلاش کریں</string>
++    <string name="back">واپس</string>
++    <string name="add_title">ڈاؤن لوڈ شامل کریں</string>
++    <string name="add_hint">لنک</string>
++    <string name="add_video">یہ ویڈیو کا صفحہ ہے (یوٹیوب اور دیگر)</string>
++    <string name="add_button">ڈاؤن لوڈ</string>
++    <string name="cancel">منسوخ</string>
++    <string name="ok">ٹھیک ہے</string>
++    <string name="empty_all">ابھی کوئی ڈاؤن لوڈ نہیں۔ + دبائیں اور لنک پیسٹ کریں، یا مینو سے براؤزر کھولیں۔</string>
++    <string name="empty_active">کچھ ڈاؤن لوڈ نہیں ہو رہا۔</string>
++    <string name="empty_completed">ابھی کوئی ڈاؤن لوڈ مکمل نہیں ہوا۔</string>
++    <string name="pause">روکیں</string>
++    <string name="resume">جاری کریں</string>
++    <string name="open">کھولیں</string>
++    <string name="share">شیئر کریں</string>
++    <string name="copy_link">لنک کاپی کریں</string>
++    <string name="link_copied">لنک کاپی ہو گیا</string>
++    <string name="cannot_open">کوئی ایپ اس فائل کو نہیں کھول سکتی</string>
++    <string name="remove">ہٹائیں</string>
++    <string name="remove_with_file">ہٹائیں اور فائل حذف کریں</string>
++    <string name="status_queued">انتظار میں…</string>
++    <string name="status_running">ڈاؤن لوڈ ہو رہی ہے</string>
++    <string name="status_paused">رکی ہوئی</string>
++    <string name="status_done">مکمل</string>
++    <string name="status_failed">ناکام</string>
++    <string name="of_size">%1$s از %2$s</string>
++    <string name="eta_seconds">%1$d سیکنڈ باقی</string>
++    <string name="eta_minutes">%1$d منٹ باقی</string>
++    <string name="eta_hours">%1$d گھنٹے %2$d منٹ باقی</string>
++    <string name="saved_in">محفوظ کیا گیا: %1$s</string>
++
++    <!-- Speed modes -->
++    <string name="speed_title">رفتار کا موڈ</string>
++    <string name="mode_fast">تیز موڈ</string>
++    <string name="mode_moderate">درمیانہ موڈ</string>
++    <string name="mode_slow">سست موڈ</string>
++    <string name="mode_snail">گھونگا موڈ</string>
++    <string name="speed_desc_unlimited">کوئی حد نہیں · بیک وقت %1$d ڈاؤن لوڈز تک</string>
++    <string name="speed_desc_limit">%1$s/s · بیک وقت %2$d ڈاؤن لوڈز تک</string>
++    <string name="snail_title">گھونگا موڈ</string>
++    <string name="snail_desc">ڈاؤن لوڈز روکے بغیر آپ کی بینڈوڈتھ آزاد کرتا ہے</string>
++
++    <!-- Video found: floating window and browser -->
++    <string name="overlay_found">یہ ویڈیو ڈاؤن لوڈ کریں؟</string>
++    <string name="overlay_download">ڈاؤن لوڈ</string>
++    <string name="overlay_added">ڈاؤن لوڈز میں شامل ہو گیا</string>
++    <string name="browser_video_found">اس صفحے پر ویڈیو</string>
++    <string name="browser_media_found">%1$d میڈیا فائلیں ملیں</string>
++    <string name="browser_pick_media">فائل منتخب کریں</string>
++
++    <!-- Settings -->
++    <string name="settings_title">ترتیبات</string>
++    <string name="settings_video">ویڈیو کی شناخت</string>
++    <string name="overlay_switch">ویڈیو ملنے پر تیرتی ہوئی ونڈو</string>
++    <string name="overlay_switch_desc">دوسری ایپس کے اوپر ڈاؤن لوڈ کا بٹن دکھاتا ہے۔ آپ اسے کسی بھی وقت بند کر سکتے ہیں۔</string>
++    <string name="overlay_needs_permission">اس کے لیے دوسری ایپس کے اوپر دکھانے کی اجازت درکار ہے۔</string>
++    <string name="settings_speed">رفتار</string>
++    <string name="settings_appearance">ظاہری شکل</string>
++    <string name="theme_system">فون کے مطابق</string>
++    <string name="theme_light">روشن</string>
++    <string name="theme_dark">تاریک</string>
++    <string name="settings_permissions">اجازتیں</string>
++    <string name="settings_permissions_open">اجازتوں کا جائزہ لیں</string>
++    <string name="settings_storage">فائلیں کہاں محفوظ ہوتی ہیں</string>
++    <string name="settings_storage_public">Download/MDM فولڈر</string>
++    <string name="settings_about">کے بارے میں</string>
++
++    <!-- Permissions screen -->
++    <string name="perm_title">ایپ کو بہترین انداز میں کام کرنے دیں</string>
++    <string name="perm_subtitle">جو چاہیں اجازت دیں۔ ہر ایک کی وضاحت دی گئی ہے، اور آپ انہیں بعد میں بدل سکتے ہیں۔</string>
++    <string name="perm_notifications_title">اطلاعات</string>
++    <string name="perm_notifications_why">آپ کی ڈاؤن لوڈز کی پیش رفت دکھاتی ہیں اور اطلاع سے ہی انہیں کنٹرول کرنے دیتی ہیں۔</string>
++    <string name="perm_overlay_title">دوسری ایپس کے اوپر دکھائیں</string>
++    <string name="perm_overlay_why">ویڈیو ملتے ہی ڈاؤن لوڈ کا بٹن آپ کے براؤزر کے اوپر آ جاتا ہے۔</string>
++    <string name="perm_battery_title">پس منظر میں چلائیں</string>
++    <string name="perm_battery_why">اسکرین بند ہونے پر اینڈرائیڈ کو طویل ڈاؤن لوڈز سلا دینے سے روکتی ہے۔</string>
++    <string name="perm_accessibility_title">ویڈیو لنک کی شناخت</string>
++    <string name="perm_accessibility_why">اختیاری۔ ایپ کو آپ کے براؤزر کا ایڈریس بار پڑھنے دیتی ہے (صرف ایڈریس، اور کچھ نہیں) تاکہ کسی بھی براؤزر میں ویڈیو کے صفحات پہچانے جا سکیں۔ ایکسیسبیلٹی کی ترتیبات میں Mister Download Manager کو آن کریں۔</string>
++    <string name="perm_storage_title">اسٹوریج</string>
++    <string name="perm_storage_why">آپ کی فائلیں Download فولڈر میں محفوظ کرتی ہے (صرف اینڈرائیڈ 8 اور 9)۔</string>
++    <string name="perm_allow">اجازت دیں</string>
++    <string name="perm_granted">اجازت مل گئی</string>
++    <string name="perm_optional">اختیاری</string>
++    <string name="perm_continue">جاری رکھیں</string>
++
++    <!-- Accessibility service -->
++    <string name="watcher_label">Mister Download Manager لنک کی شناخت</string>
++    <string name="watcher_description">ویڈیو ڈاؤن لوڈ کرنے کی پیشکش کے لیے براؤزرز کا ایڈریس بار پڑھتی ہے۔ یہ صفحے کا مواد نہیں پڑھتی۔</string>
++</resources>
+diff --git a/android/app/src/main/res/values/strings.xml b/android/app/src/main/res/values/strings.xml
+index 22202a2..47cf2ee 100644
+--- a/android/app/src/main/res/values/strings.xml
++++ b/android/app/src/main/res/values/strings.xml
+@@ -57,7 +57,7 @@
+     <string name="snail_desc">Frees your bandwidth without stopping the downloads</string>
+ 
+     <!-- Video found: floating window and browser -->
+-    <string name="overlay_found">Video found</string>
++    <string name="overlay_found">Download this video?</string>
+     <string name="overlay_download">Download</string>
+     <string name="overlay_added">Added to downloads</string>
+     <string name="browser_video_found">Video on this page</string>
+diff --git a/android/app/src/main/res/xml/link_watcher.xml b/android/app/src/main/res/xml/link_watcher.xml
+index df9e5eb..cc81521 100644
+--- a/android/app/src/main/res/xml/link_watcher.xml
++++ b/android/app/src/main/res/xml/link_watcher.xml
+@@ -7,4 +7,4 @@
+     android:canRetrieveWindowContent="true"
+     android:notificationTimeout="400"
+     android:description="@string/watcher_description"
+-    android:packageNames="com.android.chrome,com.chrome.beta,org.mozilla.firefox,org.mozilla.fenix,com.microsoft.emmx,com.brave.browser,com.opera.browser,com.sec.android.app.sbrowser,com.kiwibrowser.browser,com.vivaldi.browser" />
++    android:packageNames="com.android.chrome,com.chrome.beta,org.mozilla.firefox,org.mozilla.fenix,com.microsoft.emmx,com.brave.browser,com.opera.browser,com.sec.android.app.sbrowser,com.kiwibrowser.browser,com.vivaldi.browser,org.mozilla.firefox_beta,org.mozilla.fenix.nightly,com.duckduckgo.mobile.android,com.sec.android.app.sbrowser.beta,com.yandex.browser" />
+diff --git a/android/app/src/main/res/xml/locales_config.xml b/android/app/src/main/res/xml/locales_config.xml
+new file mode 100644
+index 0000000..15ad366
+--- /dev/null
++++ b/android/app/src/main/res/xml/locales_config.xml
+@@ -0,0 +1,14 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- The languages of the app (Android 13+: Settings > Apps > Mister Download Manager > Language). -->
++<locale-config xmlns:android="http://schemas.android.com/apk/res/android">
++    <locale android:name="en" />
++    <locale android:name="ar" />
++    <locale android:name="fr" />
++    <locale android:name="de" />
++    <locale android:name="es" />
++    <locale android:name="tr" />
++    <locale android:name="fa" />
++    <locale android:name="ur" />
++    <locale android:name="ru" />
++    <locale android:name="in" />
++</locale-config>
+diff --git a/android/gradle/libs.versions.toml b/android/gradle/libs.versions.toml
+index 5a305b6..d586724 100644
+--- a/android/gradle/libs.versions.toml
++++ b/android/gradle/libs.versions.toml
+@@ -9,7 +9,7 @@ coreKtx = "1.15.0"
+ lifecycle = "2.8.7"
+ coroutines = "1.9.0"
+ # youtubedl-android (yt-dlp + ffmpeg + Python inside the app): the video downloads.
+-youtubedl = "0.17.2"
++youtubedl = "0.18.1"
+ 
+ [libraries]
+ androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
+diff --git a/crates/android/Cargo.toml b/crates/android/Cargo.toml
+index 9e5b8a9..3e16e2d 100644
+--- a/crates/android/Cargo.toml
++++ b/crates/android/Cargo.toml
+@@ -1,6 +1,6 @@
+ [package]
+ name = "mdm-android"
+-description = "Mister Download Manager's Android library: the download engine and the torrent client behind one JNI call, for the Kotlin app in android/"
++description = "Mister Download Manager's Android library: the download engine behind one JNI call, for the Kotlin app in android/"
+ version = "0.5.2"
+ edition = "2024"
+ rust-version = "1.98"
+diff --git a/crates/android/src/lib.rs b/crates/android/src/lib.rs
+index 0133ba2..19516aa 100644
+--- a/crates/android/src/lib.rs
++++ b/crates/android/src/lib.rs
+@@ -2,8 +2,7 @@
+ //!
+ //! The Kotlin app (`android/`) holds the screens, the notifications and the foreground service;
+ //! this library holds what downloads: `mdm-engine` (HTTP, HTTPS, FTP, FTPS: segments, resume,
+-//! limits) and `mdm-torrent` (BitTorrent and magnet links, librqbit). They reach each other
+-//! through ONE native function, `Native.call(method, argsJson): String`, with JSON on both sides:
++//! limits). The two reach each other through ONE native function, `Native.call(method, argsJson): String`, with JSON on both sides:
+ //! one place where the two languages meet, nothing to keep in step but the method names below.
+ //!
+ //! Every answer is a JSON object; a failure is `{"error": "<text>"}`, never an exception (a
+@@ -28,7 +27,7 @@ use tokio::runtime::Runtime;
+ /// What every method returns: the answer, or the error's text.
+ pub(crate) type Reply = Result<Value, String>;
+ 
+-/// The runtime every download and the torrent session run on (the engine needs one around it).
++/// The runtime every download runs on (the engine needs one around it).
+ pub(crate) fn rt() -> &'static Runtime {
+     static RT: OnceLock<Runtime> = OnceLock::new();
+     RT.get_or_init(|| {

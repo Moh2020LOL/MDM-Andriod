@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Mister Download Manager</string>
+    <string name="channel_name">Downloads</string>
+    <string name="notification_summary">%1$d werden geladen · %2$s/s</string>
+
+    <!-- Main list -->
+    <string name="tab_all">Alle</string>
+    <string name="tab_active">Aktiv</string>
+    <string name="tab_completed">Abgeschlossen</string>
+    <string name="menu_browser">Browser</string>
+    <string name="menu_pause_all">Alle pausieren</string>
+    <string name="menu_resume_all">Alle fortsetzen</string>
+    <string name="menu_clear_completed">Abgeschlossene entfernen</string>
+    <string name="menu_settings">Einstellungen</string>
+    <string name="search">Suchen</string>
+    <string name="search_hint">Downloads durchsuchen</string>
+    <string name="back">Zurück</string>
+    <string name="add_title">Download hinzufügen</string>
+    <string name="add_hint">Link</string>
+    <string name="add_video">Dies ist eine Videoseite (YouTube und andere)</string>
+    <string name="add_button">Herunterladen</string>
+    <string name="cancel">Abbrechen</string>
+    <string name="ok">OK</string>
+    <string name="empty_all">Noch keine Downloads. Tippe auf + und füge einen Link ein, oder öffne den Browser über das Menü.</string>
+    <string name="empty_active">Es wird nichts heruntergeladen.</string>
+    <string name="empty_completed">Noch keine abgeschlossenen Downloads.</string>
+    <string name="pause">Pausieren</string>
+    <string name="resume">Fortsetzen</string>
+    <string name="open">Öffnen</string>
+    <string name="share">Teilen</string>
+    <string name="copy_link">Link kopieren</string>
+    <string name="link_copied">Link kopiert</string>
+    <string name="cannot_open">Keine App kann diese Datei öffnen</string>
+    <string name="remove">Entfernen</string>
+    <string name="remove_with_file">Entfernen und Datei löschen</string>
+    <string name="status_queued">Wartet…</string>
+    <string name="status_running">Wird geladen</string>
+    <string name="status_paused">Pausiert</string>
+    <string name="status_done">Fertig</string>
+    <string name="status_failed">Fehlgeschlagen</string>
+    <string name="of_size">%1$s von %2$s</string>
+    <string name="eta_seconds">noch %1$d s</string>
+    <string name="eta_minutes">noch %1$d Min.</string>
+    <string name="eta_hours">noch %1$d Std. %2$d Min.</string>
+    <string name="saved_in">Gespeichert in: %1$s</string>
+
+    <!-- Speed modes -->
+    <string name="speed_title">Geschwindigkeitsmodus</string>
+    <string name="mode_fast">Schneller Modus</string>
+    <string name="mode_moderate">Moderater Modus</string>
+    <string name="mode_slow">Langsamer Modus</string>
+    <string name="mode_snail">Schneckenmodus</string>
+    <string name="speed_desc_unlimited">Unbegrenzt · bis zu %1$d Downloads gleichzeitig</string>
+    <string name="speed_desc_limit">%1$s/s · bis zu %2$d Downloads gleichzeitig</string>
+    <string name="snail_title">Schneckenmodus</string>
+    <string name="snail_desc">Gibt Bandbreite frei, ohne die Downloads zu stoppen</string>
+
+    <!-- Video found: floating window and browser -->
+    <string name="overlay_found">Dieses Video herunterladen?</string>
+    <string name="overlay_download">Herunterladen</string>
+    <string name="overlay_added">Zu den Downloads hinzugefügt</string>
+    <string name="browser_video_found">Video auf dieser Seite</string>
+    <string name="browser_media_found">%1$d Mediendateien gefunden</string>
+    <string name="browser_pick_media">Datei auswählen</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Einstellungen</string>
+    <string name="settings_video">Videoerkennung</string>
+    <string name="overlay_switch">Schwebendes Fenster, wenn ein Video gefunden wird</string>
+    <string name="overlay_switch_desc">Zeigt eine Schaltfläche „Herunterladen“ über anderen Apps an. Du kannst sie jederzeit ausschalten.</string>
+    <string name="overlay_needs_permission">Dafür wird die Berechtigung zum Einblenden über anderen Apps benötigt.</string>
+    <string name="settings_speed">Geschwindigkeit</string>
+    <string name="settings_appearance">Darstellung</string>
+    <string name="theme_system">Wie das Telefon</string>
+    <string name="theme_light">Hell</string>
+    <string name="theme_dark">Dunkel</string>
+    <string name="settings_permissions">Berechtigungen</string>
+    <string name="settings_permissions_open">Berechtigungen prüfen</string>
+    <string name="settings_storage">Speicherort der Dateien</string>
+    <string name="settings_storage_public">Der Ordner Download/MDM</string>
+    <string name="settings_about">Über</string>
+
+    <!-- Permissions screen -->
+    <string name="perm_title">Damit die App optimal funktioniert</string>
+    <string name="perm_subtitle">Erlaube, was du möchtest. Alles wird erklärt, und du kannst es später ändern.</string>
+    <string name="perm_notifications_title">Benachrichtigungen</string>
+    <string name="perm_notifications_why">Zeigt den Fortschritt deiner Downloads an und lässt dich sie über die Benachrichtigung steuern.</string>
+    <string name="perm_overlay_title">Über anderen Apps einblenden</string>
+    <string name="perm_overlay_why">Lässt die Schaltfläche „Herunterladen“ über deinem Browser erscheinen, sobald ein Video gefunden wird.</string>
+    <string name="perm_battery_title">Im Hintergrund ausführen</string>
+    <string name="perm_battery_why">Verhindert, dass Android lange Downloads bei ausgeschaltetem Bildschirm pausiert.</string>
+    <string name="perm_accessibility_title">Erkennung von Videolinks</string>
+    <string name="perm_accessibility_why">Optional. Lässt die App die Adressleiste deines Browsers lesen (nur die Adresse, sonst nichts), um Videoseiten in jedem Browser zu erkennen. Aktiviere in den Bedienungshilfen Mister Download Manager.</string>
+    <string name="perm_storage_title">Speicher</string>
+    <string name="perm_storage_why">Speichert deine Dateien im Ordner Download (nur Android 8 und 9).</string>
+    <string name="perm_allow">Erlauben</string>
+    <string name="perm_granted">Erlaubt</string>
+    <string name="perm_optional">Optional</string>
+    <string name="perm_continue">Weiter</string>
+
+    <!-- Accessibility service -->
+    <string name="watcher_label">Linkerkennung von Mister Download Manager</string>
+    <string name="watcher_description">Liest die Adressleiste von Browsern, um das Herunterladen von Videos anzubieten. Der Seiteninhalt wird nicht gelesen.</string>
+</resources>

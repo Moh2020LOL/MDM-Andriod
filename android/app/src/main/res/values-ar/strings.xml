@@ -57,7 +57,7 @@
     <string name="snail_desc">يوفّر سرعة الإنترنت دون إيقاف التنزيلات</string>
 
     <!-- Video found: floating window and browser -->
-    <string name="overlay_found">تم العثور على فيديو</string>
+    <string name="overlay_found">تنزيل هذا الفيديو؟</string>
     <string name="overlay_download">تنزيل</string>
     <string name="overlay_added">تمت الإضافة إلى التنزيلات</string>
     <string name="browser_video_found">فيديو في هذه الصفحة</string>

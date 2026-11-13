@@ -9,7 +9,7 @@ coreKtx = "1.15.0"
 lifecycle = "2.8.7"
 coroutines = "1.9.0"
 # youtubedl-android (yt-dlp + ffmpeg + Python inside the app): the video downloads.
-youtubedl = "0.17.2"
+youtubedl = "0.18.1"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }

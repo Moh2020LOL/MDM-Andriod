@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Mister Download Manager</string>
+    <string name="channel_name">دانلودها</string>
+    <string name="notification_summary">%1$d در حال دانلود · %2$s/s</string>
+
+    <!-- Main list -->
+    <string name="tab_all">همه</string>
+    <string name="tab_active">فعال</string>
+    <string name="tab_completed">کامل‌شده</string>
+    <string name="menu_browser">مرورگر</string>
+    <string name="menu_pause_all">توقف همه</string>
+    <string name="menu_resume_all">ادامه همه</string>
+    <string name="menu_clear_completed">پاک کردن کامل‌شده‌ها</string>
+    <string name="menu_settings">تنظیمات</string>
+    <string name="search">جستجو</string>
+    <string name="search_hint">جستجو در دانلودها</string>
+    <string name="back">بازگشت</string>
+    <string name="add_title">افزودن دانلود</string>
+    <string name="add_hint">پیوند</string>
+    <string name="add_video">این یک صفحهٔ ویدیو است (یوتیوب و غیره)</string>
+    <string name="add_button">دانلود</string>
+    <string name="cancel">لغو</string>
+    <string name="ok">تأیید</string>
+    <string name="empty_all">هنوز دانلودی وجود ندارد. روی + بزنید و یک پیوند بچسبانید، یا مرورگر را از منو باز کنید.</string>
+    <string name="empty_active">هیچ دانلودی در حال انجام نیست.</string>
+    <string name="empty_completed">هنوز دانلود کامل‌شده‌ای وجود ندارد.</string>
+    <string name="pause">توقف</string>
+    <string name="resume">ادامه</string>
+    <string name="open">باز کردن</string>
+    <string name="share">اشتراک‌گذاری</string>
+    <string name="copy_link">کپی پیوند</string>
+    <string name="link_copied">پیوند کپی شد</string>
+    <string name="cannot_open">هیچ برنامه‌ای نمی‌تواند این فایل را باز کند</string>
+    <string name="remove">حذف</string>
+    <string name="remove_with_file">حذف و پاک کردن فایل</string>
+    <string name="status_queued">در انتظار…</string>
+    <string name="status_running">در حال دانلود</string>
+    <string name="status_paused">متوقف شد</string>
+    <string name="status_done">تمام شد</string>
+    <string name="status_failed">ناموفق</string>
+    <string name="of_size">%1$s از %2$s</string>
+    <string name="eta_seconds">%1$d ثانیه مانده</string>
+    <string name="eta_minutes">%1$d دقیقه مانده</string>
+    <string name="eta_hours">%1$d ساعت و %2$d دقیقه مانده</string>
+    <string name="saved_in">ذخیره شد در: %1$s</string>
+
+    <!-- Speed modes -->
+    <string name="speed_title">حالت سرعت</string>
+    <string name="mode_fast">حالت سریع</string>
+    <string name="mode_moderate">حالت متوسط</string>
+    <string name="mode_slow">حالت آهسته</string>
+    <string name="mode_snail">حالت حلزونی</string>
+    <string name="speed_desc_unlimited">بدون محدودیت · تا %1$d دانلود همزمان</string>
+    <string name="speed_desc_limit">%1$s/s · تا %2$d دانلود همزمان</string>
+    <string name="snail_title">حالت حلزونی</string>
+    <string name="snail_desc">پهنای باند شما را بدون توقف دانلودها آزاد می‌کند</string>
+
+    <!-- Video found: floating window and browser -->
+    <string name="overlay_found">این ویدیو دانلود شود؟</string>
+    <string name="overlay_download">دانلود</string>
+    <string name="overlay_added">به دانلودها اضافه شد</string>
+    <string name="browser_video_found">ویدیو در این صفحه</string>
+    <string name="browser_media_found">%1$d فایل رسانه‌ای پیدا شد</string>
+    <string name="browser_pick_media">یک فایل انتخاب کنید</string>
+
+    <!-- Settings -->
+    <string name="settings_title">تنظیمات</string>
+    <string name="settings_video">تشخیص ویدیو</string>
+    <string name="overlay_switch">پنجرهٔ شناور هنگام پیدا شدن ویدیو</string>
+    <string name="overlay_switch_desc">دکمهٔ دانلود را روی برنامه‌های دیگر نشان می‌دهد. هر زمان بخواهید می‌توانید آن را خاموش کنید.</string>
+    <string name="overlay_needs_permission">این قابلیت به مجوز نمایش روی برنامه‌های دیگر نیاز دارد.</string>
+    <string name="settings_speed">سرعت</string>
+    <string name="settings_appearance">ظاهر</string>
+    <string name="theme_system">مطابق گوشی</string>
+    <string name="theme_light">روشن</string>
+    <string name="theme_dark">تاریک</string>
+    <string name="settings_permissions">مجوزها</string>
+    <string name="settings_permissions_open">بررسی مجوزها</string>
+    <string name="settings_storage">محل ذخیرهٔ فایل‌ها</string>
+    <string name="settings_storage_public">پوشهٔ Download/MDM</string>
+    <string name="settings_about">دربارهٔ برنامه</string>
+
+    <!-- Permissions screen -->
+    <string name="perm_title">بگذارید برنامه به بهترین شکل کار کند</string>
+    <string name="perm_subtitle">هر چه می‌خواهید اجازه دهید. برای هر مورد توضیح داده شده و بعداً می‌توانید آن‌ها را تغییر دهید.</string>
+    <string name="perm_notifications_title">اعلان‌ها</string>
+    <string name="perm_notifications_why">پیشرفت دانلودهای شما را نشان می‌دهد و امکان کنترل آن‌ها را از اعلان فراهم می‌کند.</string>
+    <string name="perm_overlay_title">نمایش روی برنامه‌های دیگر</string>
+    <string name="perm_overlay_why">باعث می‌شود دکمهٔ دانلود به محض پیدا شدن ویدیو روی مرورگر شما ظاهر شود.</string>
+    <string name="perm_battery_title">اجرا در پس‌زمینه</string>
+    <string name="perm_battery_why">از به خواب رفتن دانلودهای طولانی توسط اندروید هنگام خاموش بودن صفحه جلوگیری می‌کند.</string>
+    <string name="perm_accessibility_title">تشخیص پیوند ویدیو</string>
+    <string name="perm_accessibility_why">اختیاری. به برنامه اجازه می‌دهد نوار آدرس مرورگر شما را بخواند (فقط آدرس، نه چیز دیگر) تا صفحه‌های ویدیو را در هر مرورگری تشخیص دهد. در تنظیمات دسترسی‌پذیری، Mister Download Manager را روشن کنید.</string>
+    <string name="perm_storage_title">حافظه</string>
+    <string name="perm_storage_why">فایل‌های شما را در پوشهٔ Download ذخیره می‌کند (فقط اندروید ۸ و ۹).</string>
+    <string name="perm_allow">اجازه دادن</string>
+    <string name="perm_granted">مجاز</string>
+    <string name="perm_optional">اختیاری</string>
+    <string name="perm_continue">ادامه</string>
+
+    <!-- Accessibility service -->
+    <string name="watcher_label">تشخیص پیوند Mister Download Manager</string>
+    <string name="watcher_description">نوار آدرس مرورگرها را می‌خواند تا دانلود ویدیو را پیشنهاد دهد. محتوای صفحه را نمی‌خواند.</string>
+</resources>

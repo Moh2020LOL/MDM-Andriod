@@ -57,7 +57,7 @@
     <string name="snail_desc">Frees your bandwidth without stopping the downloads</string>
 
     <!-- Video found: floating window and browser -->
-    <string name="overlay_found">Video found</string>
+    <string name="overlay_found">Download this video?</string>
     <string name="overlay_download">Download</string>
     <string name="overlay_added">Added to downloads</string>
     <string name="browser_video_found">Video on this page</string>
