@@ -2,15 +2,36 @@
 <resources>
     <string name="app_name">Mister Download Manager</string>
     <string name="channel_name">Downloads</string>
+    <string name="notification_summary">%1$d downloading · %2$s/s</string>
+
+    <!-- Main list -->
+    <string name="tab_all">All</string>
+    <string name="tab_active">Active</string>
+    <string name="tab_completed">Completed</string>
+    <string name="menu_browser">Browser</string>
+    <string name="menu_pause_all">Pause all</string>
+    <string name="menu_resume_all">Resume all</string>
+    <string name="menu_clear_completed">Clear completed</string>
+    <string name="menu_settings">Settings</string>
+    <string name="search">Search</string>
+    <string name="search_hint">Search downloads</string>
+    <string name="back">Back</string>
     <string name="add_title">Add a download</string>
-    <string name="add_hint">Link or magnet link</string>
+    <string name="add_hint">Link</string>
     <string name="add_video">This is a video page (YouTube and others)</string>
     <string name="add_button">Download</string>
     <string name="cancel">Cancel</string>
-    <string name="open_torrent">Open a .torrent file</string>
-    <string name="empty">No downloads yet. Tap + and paste a link.</string>
+    <string name="ok">OK</string>
+    <string name="empty_all">No downloads yet. Tap + and paste a link, or open the browser from the menu.</string>
+    <string name="empty_active">Nothing is downloading.</string>
+    <string name="empty_completed">No finished downloads yet.</string>
     <string name="pause">Pause</string>
     <string name="resume">Resume</string>
+    <string name="open">Open</string>
+    <string name="share">Share</string>
+    <string name="copy_link">Copy link</string>
+    <string name="link_copied">Link copied</string>
+    <string name="cannot_open">No app can open this file</string>
     <string name="remove">Remove</string>
     <string name="remove_with_file">Remove and delete the file</string>
     <string name="status_queued">Waiting…</string>
@@ -19,6 +40,66 @@
     <string name="status_done">Finished</string>
     <string name="status_failed">Failed</string>
     <string name="of_size">%1$s of %2$s</string>
-    <string name="notification_summary">%1$d downloading · %2$s/s</string>
+    <string name="eta_seconds">%1$d s left</string>
+    <string name="eta_minutes">%1$d min left</string>
+    <string name="eta_hours">%1$d h %2$d min left</string>
     <string name="saved_in">Saved in: %1$s</string>
+
+    <!-- Speed modes -->
+    <string name="speed_title">Speed mode</string>
+    <string name="mode_fast">Fast mode</string>
+    <string name="mode_moderate">Moderate mode</string>
+    <string name="mode_slow">Slow mode</string>
+    <string name="mode_snail">Snail mode</string>
+    <string name="speed_desc_unlimited">No limit · up to %1$d downloads at once</string>
+    <string name="speed_desc_limit">%1$s/s · up to %2$d downloads at once</string>
+    <string name="snail_title">Snail mode</string>
+    <string name="snail_desc">Frees your bandwidth without stopping the downloads</string>
+
+    <!-- Video found: floating window and browser -->
+    <string name="overlay_found">Video found</string>
+    <string name="overlay_download">Download</string>
+    <string name="overlay_added">Added to downloads</string>
+    <string name="browser_video_found">Video on this page</string>
+    <string name="browser_media_found">%1$d media files found</string>
+    <string name="browser_pick_media">Choose a file</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_video">Video detection</string>
+    <string name="overlay_switch">Floating window when a video is found</string>
+    <string name="overlay_switch_desc">Shows a Download button over other apps. You can turn it off any time.</string>
+    <string name="overlay_needs_permission">This needs the permission to display over other apps.</string>
+    <string name="settings_speed">Speed</string>
+    <string name="settings_appearance">Appearance</string>
+    <string name="theme_system">Follow the phone</string>
+    <string name="theme_light">Light</string>
+    <string name="theme_dark">Dark</string>
+    <string name="settings_permissions">Permissions</string>
+    <string name="settings_permissions_open">Review permissions</string>
+    <string name="settings_storage">Where files are saved</string>
+    <string name="settings_storage_public">The Download/MDM folder</string>
+    <string name="settings_about">About</string>
+
+    <!-- Permissions screen -->
+    <string name="perm_title">Let the app work at its best</string>
+    <string name="perm_subtitle">Allow what you want. Each one is explained, and you can change them later.</string>
+    <string name="perm_notifications_title">Notifications</string>
+    <string name="perm_notifications_why">Shows the progress of your downloads and lets you control them from the notification.</string>
+    <string name="perm_overlay_title">Display over other apps</string>
+    <string name="perm_overlay_why">Lets the Download button appear on top of your browser the moment a video is found.</string>
+    <string name="perm_battery_title">Run in the background</string>
+    <string name="perm_battery_why">Stops Android from putting long downloads to sleep when the screen is off.</string>
+    <string name="perm_accessibility_title">Video link detection</string>
+    <string name="perm_accessibility_why">Optional. Lets the app read the address bar of your browser (only the address, nothing else) to notice video pages in any browser. In Accessibility settings, turn on Mister Download Manager.</string>
+    <string name="perm_storage_title">Storage</string>
+    <string name="perm_storage_why">Saves your files in the Download folder (Android 8 and 9 only).</string>
+    <string name="perm_allow">Allow</string>
+    <string name="perm_granted">Allowed</string>
+    <string name="perm_optional">Optional</string>
+    <string name="perm_continue">Continue</string>
+
+    <!-- Accessibility service -->
+    <string name="watcher_label">Mister Download Manager link detection</string>
+    <string name="watcher_description">Reads the address bar of browsers to offer downloading videos. It does not read page content.</string>
 </resources>

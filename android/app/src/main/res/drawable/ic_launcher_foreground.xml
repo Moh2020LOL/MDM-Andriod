@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Adaptive icon foreground: a white download arrow over a tray. Drawn on the 108dp grid;
+     everything stays inside the central 66dp so no launcher mask cuts it. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- the arrow: shaft and head -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M49,30h10v20h9L54,64L40,50h9z" />
+    <!-- the tray -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M36,70h36v6h-36z" />
+</vector>

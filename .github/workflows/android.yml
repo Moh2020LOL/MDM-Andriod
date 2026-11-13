@@ -1,14 +1,22 @@
-﻿name: Android APK
+name: Android APK
 
 # Builds the Android app in the cloud: nothing to install on your computer.
-# Run it from the Actions tab (Run workflow); the APK is under the run's "Artifacts".
+# Run it from the Actions tab (Run workflow), or it runs on every push that touches the Android
+# files. The APKs are under the run's "Artifacts": one per processor (arm64-v8a, armeabi-v7a, x86,
+# x86_64) and a universal one. The last step fails if any APK is over 300 MB.
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - "android/**"
+      - "crates/android/**"
+      - "tools/android/**"
+      - ".github/workflows/android.yml"
 
 jobs:
   apk:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 
@@ -19,7 +27,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
 
       - name: Install libclang
         run: sudo apt-get update && sudo apt-get install -y libclang-dev
@@ -28,21 +36,31 @@ jobs:
         run: cargo install cargo-ndk --locked
 
       # GitHub's Ubuntu runners come with an NDK; ANDROID_NDK_HOME points at it.
-      - name: Build the Rust library
+      - name: Build the Rust library for all four processors
         run: tools/android/build-rust.sh release
 
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
 
-      # A debug APK is signed with a debug key: installable on your own phone, not for a store.
+      # Signed with the debug key (see android/app/build.gradle.kts): installable on your own
+      # phone, not for a store.
       - name: Build the app
-        run: gradle -p android assembleDebug
+        run: gradle -p android assembleRelease
+
+      - name: APK sizes (fail over 300 MB)
+        run: |
+          ls -l android/app/build/outputs/apk/release/*.apk
+          for f in android/app/build/outputs/apk/release/*.apk; do
+            size=$(stat -c %s "$f")
+            echo "$f: $((size / 1024 / 1024)) MB"
+            if [ "$size" -gt $((300 * 1024 * 1024)) ]; then
+              echo "::error::$f is over 300 MB"
+              exit 1
+            fi
+          done
 
       - uses: actions/upload-artifact@v4
         with:
-          name: mister-download-manager-debug-apk
-          path: android/app/build/outputs/apk/debug/*.apk
-
-
-
+          name: mister-download-manager-apks
+          path: android/app/build/outputs/apk/release/*.apk

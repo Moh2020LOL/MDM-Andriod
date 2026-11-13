@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Downloads still in the app's own folder: Android/data/<app>/files/Download -->
+    <external-files-path name="downloads" path="." />
+    <files-path name="internal" path="." />
+</paths>

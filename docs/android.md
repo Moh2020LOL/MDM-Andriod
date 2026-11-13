@@ -10,6 +10,8 @@ MDM for Android is two pieces:
 The desktop app's window (`crates/app`, egui) is not used on the phone: it is drawn for a mouse, many
 windows and Win32. The engine never knew about it, so it moves over as it is.
 
+> **Where things are.** The map of the code and the change log are in [android-reference.md](android-reference.md); where the work stopped is in [android-handoff.md](android-handoff.md). Torrents were removed (see the reference); the torrent rows below describe the first version.
+>
 > **Status.** Written, not yet built or run on a phone. The first build will show small
 > mismatches (a version, a name); the list at the end says where to look first.
 
@@ -17,7 +19,7 @@ windows and Win32. The engine never knew about it, so it moves over as it is.
 
 1. Install Android Studio (its SDK Manager: SDK Platform 35, SDK Tools → NDK) and Rust (rustup).
 2. `export ANDROID_NDK_HOME=<sdk>/ndk/<version>`
-3. `tools/android/build-rust.sh`: builds `libmdm_android.so` for arm64-v8a, armeabi-v7a and
+3. `tools/android/build-rust.sh`: builds `libmdm_android.so` for arm64-v8a, armeabi-v7a, x86 and
    x86_64 into `android/app/src/main/jniLibs/`.
 4. Open `android/` in Android Studio (it makes the Gradle wrapper), run the `app` on a phone.
 

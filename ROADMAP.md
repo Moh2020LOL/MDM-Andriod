@@ -809,11 +809,14 @@ These ship in a later version, when they're ready.
   (`MDM_WAYLAND=1`) placing their menus, which needs popup windows the window library doesn't
   have yet, so XWayland stays the default; Vulkan as the default renderer (below)
 - 🔄 The Safari extension (in 0.5.2): still to check in Safari itself, signed with a Developer ID
-- 🔄 Android: the engine and the torrent client behind one JNI door (`crates/android`), a Kotlin
-  and Compose app around it (`android/`): HTTP, HTTPS, FTP and FTPS downloads with resume,
-  torrents and magnet links, videos through yt-dlp, a foreground service with its notification,
-  links from the browser's share sheet. Written, not yet built or run on a phone: see
-  [docs/android.md](docs/android.md) for the build steps and what to check first
+- 🔄 Android: the engine behind one JNI door (`crates/android`), a Kotlin and Compose app around
+  it (`android/`) laid out like a phone download manager: HTTP, HTTPS, FTP and FTPS downloads with
+  resume, a queue, Fast / Moderate / Slow / Snail speed modes, videos through yt-dlp, a built-in
+  browser that finds videos, an optional floating "video found" window over other apps, a
+  permissions screen, files saved in Download/MDM, dark mode, Arabic and English, an icon, and
+  builds for arm64, 32-bit ARM, x86 and x86_64 (APKs checked to stay under 300 MB). Torrents are
+  left out for now. Written, not yet built or run on a phone: see [docs/android.md](docs/android.md)
+  and [docs/android-reference.md](docs/android-reference.md)
 
 ### Bugs being looked into
 

@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.MDM" parent="android:Theme.Material.NoActionBar" />
+    <!-- The screens are Compose; this only colours the window before the first frame. -->
+    <style name="Theme.MDM" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">@color/mdm_blue</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowBackground">@color/mdm_blue</item>
+    </style>
 </resources>

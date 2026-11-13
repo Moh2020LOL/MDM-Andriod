@@ -2,15 +2,36 @@
 <resources>
     <string name="app_name">Mister Download Manager</string>
     <string name="channel_name">التنزيلات</string>
+    <string name="notification_summary">%1$d قيد التنزيل · %2$s/ث</string>
+
+    <!-- Main list -->
+    <string name="tab_all">الكل</string>
+    <string name="tab_active">النشطة</string>
+    <string name="tab_completed">المكتملة</string>
+    <string name="menu_browser">المتصفح</string>
+    <string name="menu_pause_all">إيقاف الكل مؤقتًا</string>
+    <string name="menu_resume_all">استئناف الكل</string>
+    <string name="menu_clear_completed">مسح المكتملة</string>
+    <string name="menu_settings">الإعدادات</string>
+    <string name="search">بحث</string>
+    <string name="search_hint">ابحث في التنزيلات</string>
+    <string name="back">رجوع</string>
     <string name="add_title">إضافة تنزيل</string>
-    <string name="add_hint">رابط أو رابط magnet</string>
+    <string name="add_hint">الرابط</string>
     <string name="add_video">هذه صفحة فيديو (يوتيوب وغيره)</string>
     <string name="add_button">تنزيل</string>
     <string name="cancel">إلغاء</string>
-    <string name="open_torrent">فتح ملف .torrent</string>
-    <string name="empty">لا توجد تنزيلات بعد. اضغط + والصق رابطًا.</string>
+    <string name="ok">حسنًا</string>
+    <string name="empty_all">لا توجد تنزيلات بعد. اضغط + والصق رابطًا، أو افتح المتصفح من القائمة.</string>
+    <string name="empty_active">لا شيء قيد التنزيل.</string>
+    <string name="empty_completed">لا توجد تنزيلات مكتملة بعد.</string>
     <string name="pause">إيقاف مؤقت</string>
     <string name="resume">استئناف</string>
+    <string name="open">فتح</string>
+    <string name="share">مشاركة</string>
+    <string name="copy_link">نسخ الرابط</string>
+    <string name="link_copied">تم نسخ الرابط</string>
+    <string name="cannot_open">لا يوجد تطبيق يفتح هذا الملف</string>
     <string name="remove">إزالة</string>
     <string name="remove_with_file">إزالة مع حذف الملف</string>
     <string name="status_queued">في الانتظار…</string>
@@ -19,6 +40,66 @@
     <string name="status_done">اكتمل</string>
     <string name="status_failed">فشل</string>
     <string name="of_size">%1$s من %2$s</string>
-    <string name="notification_summary">%1$d قيد التنزيل · %2$s/ث</string>
+    <string name="eta_seconds">متبقي %1$d ث</string>
+    <string name="eta_minutes">متبقي %1$d د</string>
+    <string name="eta_hours">متبقي %1$d س %2$d د</string>
     <string name="saved_in">المحفوظ في: %1$s</string>
+
+    <!-- Speed modes -->
+    <string name="speed_title">وضع السرعة</string>
+    <string name="mode_fast">الوضع السريع</string>
+    <string name="mode_moderate">الوضع المتوسط</string>
+    <string name="mode_slow">الوضع البطيء</string>
+    <string name="mode_snail">وضع الحلزون</string>
+    <string name="speed_desc_unlimited">بلا حد · حتى %1$d تنزيلات معًا</string>
+    <string name="speed_desc_limit">%1$s/ث · حتى %2$d تنزيلات معًا</string>
+    <string name="snail_title">وضع الحلزون</string>
+    <string name="snail_desc">يوفّر سرعة الإنترنت دون إيقاف التنزيلات</string>
+
+    <!-- Video found: floating window and browser -->
+    <string name="overlay_found">تم العثور على فيديو</string>
+    <string name="overlay_download">تنزيل</string>
+    <string name="overlay_added">تمت الإضافة إلى التنزيلات</string>
+    <string name="browser_video_found">فيديو في هذه الصفحة</string>
+    <string name="browser_media_found">تم العثور على %1$d ملفات وسائط</string>
+    <string name="browser_pick_media">اختر ملفًا</string>
+
+    <!-- Settings -->
+    <string name="settings_title">الإعدادات</string>
+    <string name="settings_video">اكتشاف الفيديو</string>
+    <string name="overlay_switch">نافذة عائمة عند العثور على فيديو</string>
+    <string name="overlay_switch_desc">تُظهر زر تنزيل فوق التطبيقات الأخرى. يمكنك إيقافها في أي وقت.</string>
+    <string name="overlay_needs_permission">يحتاج هذا إلى إذن العرض فوق التطبيقات الأخرى.</string>
+    <string name="settings_speed">السرعة</string>
+    <string name="settings_appearance">المظهر</string>
+    <string name="theme_system">اتباع الهاتف</string>
+    <string name="theme_light">فاتح</string>
+    <string name="theme_dark">داكن</string>
+    <string name="settings_permissions">الأذونات</string>
+    <string name="settings_permissions_open">مراجعة الأذونات</string>
+    <string name="settings_storage">مكان حفظ الملفات</string>
+    <string name="settings_storage_public">مجلد Download/MDM</string>
+    <string name="settings_about">حول التطبيق</string>
+
+    <!-- Permissions screen -->
+    <string name="perm_title">لنجعل التطبيق يعمل بأفضل شكل</string>
+    <string name="perm_subtitle">اسمح بما تريد. كل إذن مشروح، ويمكنك تغييرها لاحقًا.</string>
+    <string name="perm_notifications_title">الإشعارات</string>
+    <string name="perm_notifications_why">تعرض تقدّم تنزيلاتك وتتيح لك التحكم بها من الإشعار.</string>
+    <string name="perm_overlay_title">العرض فوق التطبيقات الأخرى</string>
+    <string name="perm_overlay_why">يجعل زر التنزيل يظهر فوق المتصفح لحظة العثور على فيديو.</string>
+    <string name="perm_battery_title">العمل في الخلفية</string>
+    <string name="perm_battery_why">يمنع أندرويد من إيقاف التنزيلات الطويلة عند إطفاء الشاشة.</string>
+    <string name="perm_accessibility_title">اكتشاف روابط الفيديو</string>
+    <string name="perm_accessibility_why">اختياري. يسمح للتطبيق بقراءة شريط عنوان المتصفح (العنوان فقط ولا شيء غيره) ليلاحظ صفحات الفيديو في أي متصفح. في إعدادات إمكانية الوصول فعّل Mister Download Manager.</string>
+    <string name="perm_storage_title">التخزين</string>
+    <string name="perm_storage_why">يحفظ ملفاتك في مجلد التنزيلات (أندرويد 8 و9 فقط).</string>
+    <string name="perm_allow">سماح</string>
+    <string name="perm_granted">مسموح</string>
+    <string name="perm_optional">اختياري</string>
+    <string name="perm_continue">متابعة</string>
+
+    <!-- Accessibility service -->
+    <string name="watcher_label">اكتشاف روابط Mister Download Manager</string>
+    <string name="watcher_description">يقرأ شريط عنوان المتصفحات ليعرض تنزيل الفيديوهات. لا يقرأ محتوى الصفحات.</string>
 </resources>

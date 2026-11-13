@@ -12,16 +12,32 @@ android {
         applicationId = "dev.mdm.android"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.5.2"
-        // The Rust library is built for these (tools/android/build-rust.sh).
-        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
+        versionCode = 2
+        versionName = "0.6.0"
+        // No ndk.abiFilters here: with `splits.abi` below AGP refuses both. Which processors get a
+        // library is decided by the folders in src/main/jniLibs (tools/android/build-rust.sh makes all four).
+    }
+
+    // One APK per processor (each far smaller than all four together: youtubedl-android carries
+    // Python, yt-dlp and ffmpeg for every one) PLUS a universal APK that runs on any of them.
+    // The workflow checks that none is over 300 MB (.github/workflows/android.yml).
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
+            isUniversalApk = true
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // Signed with the debug key so the release APK installs on your own phone without a
+            // keystore. For a store, put a real signingConfig here.
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 

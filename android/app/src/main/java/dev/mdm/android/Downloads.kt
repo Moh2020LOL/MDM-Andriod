@@ -2,6 +2,7 @@ package dev.mdm.android
 
 import android.content.Context
 import android.os.Environment
+import android.webkit.CookieManager
 import dev.mdm.android.Native.error
 import java.io.File
 import java.util.UUID
@@ -18,7 +19,9 @@ import org.json.JSONObject
 
 /**
  * The downloads list and what runs it: one place that asks the Rust library (every half second)
- * how each running download is, and keeps the list on disk so it survives the app's process.
+ * how each running download is, keeps the list on disk so it survives the app's process, and
+ * keeps the queue: at most [Prefs.maxSimultaneous] run at once, the rest wait (Status.QUEUED),
+ * oldest first. The speed mode's limit is shared between the running downloads.
  */
 object Downloads {
     // Chrome on Android, as sites expect a phone's browser to introduce itself.
@@ -33,10 +36,12 @@ object Downloads {
     private lateinit var app: Context
     private lateinit var listFile: File
     private var started = false
-    private var torrentsUp = false
 
-    /** Where files are saved: the app's own Downloads folder (no storage permission needed). */
-    val saveDir: File get() = app.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: app.filesDir
+    /** Where files are saved while downloading (Android 8-9 with permission: the public folder itself). */
+    val saveDir: File
+        get() = Files.legacyPublicDir(app)
+            ?: app.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+            ?: app.filesDir
 
     fun start(context: Context) {
         synchronized(this) {
@@ -48,63 +53,100 @@ object Downloads {
         scope.launch {
             Native.invoke("init", JSONObject().put("user_agent", USER_AGENT))
             // What was running when the app's process ended starts again (a download resumes
-            // from its state file, a torrent from its resume data).
+            // from its state file).
             _items.value = load().map {
-                if (it.status == Status.RUNNING) it.copy(status = Status.QUEUED, speed = 0) else it
+                if (it.status == Status.RUNNING) it.copy(status = Status.QUEUED, speed = 0, engineId = 0) else it
             }
-            _items.value.filter { it.status == Status.QUEUED }.forEach { begin(it) }
+            schedule()
             poll()
         }
+        // A new speed mode or snail mode changes the limits of what already runs.
+        scope.launch { Prefs.speedMode.collect { schedule() } }
+        scope.launch { Prefs.snail.collect { applyLimits() } }
     }
 
     // ---- adding ----
 
-    /** What the person typed, pasted or shared. [video]: a web page for yt-dlp. */
-    fun add(text: String, video: Boolean = false) {
+    /**
+     * What the person typed, pasted, shared or caught in the browser. [video]: a web page for yt-dlp.
+     * [referer]: the page a browser download came from.
+     */
+    fun add(text: String, video: Boolean = false, referer: String? = null) {
         val t = text.trim()
         if (t.isEmpty()) return
         scope.launch {
             val key = UUID.randomUUID().toString()
             val dir = saveDir.absolutePath
-            val item = when {
-                t.startsWith("magnet:", ignoreCase = true) ->
-                    Item(key, Kind.TORRENT, t, dir = dir, title = magnetName(t))
-                video -> Item(key, Kind.VIDEO, t, page = t, dir = dir, title = t)
-                t.substringBefore('?').endsWith(".torrent", ignoreCase = true) &&
-                    t.startsWith("http", ignoreCase = true) -> Item(key, Kind.TORRENT, t, dir = dir, title = t)
-                else -> Item(key, Kind.HTTP, t, dir = dir, title = t.substringBefore('?').substringAfterLast('/').ifEmpty { t })
+            val item = if (video) {
+                Item(key, Kind.VIDEO, t, page = t, dir = dir, title = t)
+            } else {
+                Item(
+                    key, Kind.HTTP, t, dir = dir, referer = referer,
+                    title = t.substringBefore('?').substringAfterLast('/').ifEmpty { t },
+                )
             }
             _items.update { listOf(item) + it }
             save()
-            begin(item)
+            schedule()
         }
     }
 
-    /** A .torrent file the person picked: its bytes are kept in the app's folder, so it can start again later. */
-    fun addTorrentFile(bytes: ByteArray, name: String) {
-        scope.launch {
-            val key = UUID.randomUUID().toString()
-            val saved = File(File(app.filesDir, "torrents").apply { mkdirs() }, "$key.torrent")
-            saved.writeBytes(bytes)
-            val item = Item(key, Kind.TORRENT, saved.absolutePath, dir = saveDir.absolutePath, title = name)
-            _items.update { listOf(item) + it }
-            save()
-            begin(item)
+    // ---- the queue ----
+
+    /** Starts queued downloads until [Prefs.maxSimultaneous] run; marks them running right away. */
+    private fun schedule() {
+        val max = Prefs.maxSimultaneous()
+        val toStart = mutableListOf<Item>()
+        _items.update { list ->
+            toStart.clear()
+            var running = list.count { it.status == Status.RUNNING }
+            val keys = HashSet<String>()
+            // The list is newest first: the oldest waiting download goes first.
+            for (candidate in list.asReversed()) {
+                if (running >= max) break
+                if (candidate.status == Status.QUEUED) {
+                    keys += candidate.key
+                    running++
+                }
+            }
+            list.map { item ->
+                if (item.key in keys) {
+                    val started = item.copy(status = Status.RUNNING, error = null)
+                    toStart += started
+                    started
+                } else {
+                    item
+                }
+            }
+        }
+        if (toStart.isNotEmpty()) DownloadService.ensureRunning(app)
+        toStart.forEach { item -> scope.launch { begin(item) } }
+        applyLimits()
+    }
+
+    /** The speed mode's total limit, divided between the downloads that run (0: none). */
+    private fun perDownloadLimit(): Long {
+        val total = Prefs.totalLimitBps()
+        if (total <= 0) return 0
+        val running = _items.value.count { it.status == Status.RUNNING }.coerceAtLeast(1)
+        return (total / running).coerceAtLeast(1_000)
+    }
+
+    private fun applyLimits() {
+        val per = perDownloadLimit()
+        _items.value.filter { it.status == Status.RUNNING && it.engineId != 0L }.forEach {
+            Native.invoke("http_limit", JSONObject().put("id", it.engineId).put("bps", per))
         }
     }
 
-    private fun magnetName(magnet: String): String =
-        Regex("[?&]dn=([^&]+)").find(magnet)?.groupValues?.get(1)
-            ?.let { java.net.URLDecoder.decode(it, "UTF-8") } ?: magnet.take(60)
+    private fun stillRunning(key: String): Boolean =
+        _items.value.any { it.key == key && it.status == Status.RUNNING }
 
     // ---- starting, pausing, resuming ----
 
-    /** Starts (or starts again) what [item] is; marks it running, or failed with the reason. */
+    /** Starts (or starts again) what [item] is. [schedule] already marked it running. */
     private fun begin(item: Item) {
-        change(item.key) { it.copy(status = Status.RUNNING, error = null) }
-        DownloadService.ensureRunning(app)
         when (item.kind) {
-            Kind.TORRENT -> beginTorrent(item)
             Kind.VIDEO -> {
                 // The stream's address is short-lived: always ask for a fresh one.
                 val found = runCatching { VideoResolver.resolve(app, item.page ?: item.source) }
@@ -117,79 +159,85 @@ object Downloads {
         }
     }
 
+    private fun headersFor(item: Item): JSONObject {
+        val h = JSONObject()
+        item.referer?.let { h.put("Referer", it) }
+        // Cookies the in-app browser holds for this site (a login, a "human check" already passed).
+        val cookie = runCatching { CookieManager.getInstance().getCookie(item.source) }.getOrNull()
+        if (!cookie.isNullOrEmpty()) h.put("Cookie", cookie)
+        return h
+    }
+
     private fun beginHttp(item: Item, name: String?) {
-        val args = JSONObject().put("url", item.source).put("dir", item.dir).put("connections", 8)
-        if (name != null) args.put("name", name)
+        // Paused while the address was being asked for: don't start.
+        if (!stillRunning(item.key)) return
+        val limit = perDownloadLimit()
+        val headers = headersFor(item)
         val state = item.stateFile
         val r = if (state != null && File(state).exists()) {
-            Native.invoke("http_resume", JSONObject().put("state_file", state).put("connections", 8))
+            Native.invoke(
+                "http_resume",
+                JSONObject().put("state_file", state).put("connections", 8).put("limit", limit).put("headers", headers),
+            )
         } else {
+            val args = JSONObject().put("url", item.source).put("dir", item.dir)
+                .put("connections", 8).put("limit", limit).put("headers", headers)
+            if (name != null) args.put("name", name)
             Native.invoke("http_start", args)
         }
         r.error()?.let { return fail(item.key, it) }
         change(item.key) { it.copy(engineId = r.getLong("id")) }
     }
 
-    private fun beginTorrent(item: Item) {
-        if (!torrentsUp) {
-            val r = Native.invoke(
-                "torrent_start",
-                JSONObject().put("state_dir", File(app.filesDir, "torrent-state").absolutePath),
-            )
-            r.error()?.let { return fail(item.key, it) }
-            torrentsUp = true
-        }
-        // Already in the session (its resume data was read at start): just let it run.
-        if (item.hash != null && Native.invoke("torrent_resume", JSONObject().put("hash", item.hash)).error() == null) {
-            return
-        }
-        // A magnet waits for the swarm's file list: this call can take a minute and a half.
-        val r = Native.invoke(
-            "torrent_add",
-            JSONObject().put("source", item.source).put("dir", item.dir),
-        )
-        r.error()?.let { return fail(item.key, it) }
-        change(item.key) { it.copy(hash = r.getString("hash"), title = r.getString("name"), total = r.getLong("total")) }
-    }
-
     fun pause(key: String) {
         val item = _items.value.firstOrNull { it.key == key } ?: return
         scope.launch {
-            when (item.kind) {
-                Kind.TORRENT -> item.hash?.let { Native.invoke("torrent_pause", JSONObject().put("hash", it)) }
-                else -> if (item.engineId != 0L) {
-                    Native.invoke("http_cancel", JSONObject().put("id", item.engineId))
-                    // Wait for the workers to stop and the state to be written, then let go.
-                    Native.invoke("http_finish", JSONObject().put("id", item.engineId))
-                }
+            if (item.engineId != 0L) {
+                Native.invoke("http_cancel", JSONObject().put("id", item.engineId))
+                // Wait for the workers to stop and the state to be written, then let go.
+                Native.invoke("http_finish", JSONObject().put("id", item.engineId))
             }
             change(key) { it.copy(status = Status.PAUSED, speed = 0, engineId = 0) }
             save()
+            schedule()
         }
     }
 
     fun resume(key: String) {
-        val item = _items.value.firstOrNull { it.key == key } ?: return
-        scope.launch { begin(item) }
+        scope.launch {
+            change(key) { it.copy(status = Status.QUEUED, error = null) }
+            save()
+            schedule()
+        }
     }
+
+    fun pauseAll() = _items.value.filter { it.status == Status.RUNNING || it.status == Status.QUEUED }
+        .forEach { pause(it.key) }
+
+    fun resumeAll() = _items.value.filter { it.status == Status.PAUSED || it.status == Status.FAILED }
+        .forEach { resume(it.key) }
 
     fun remove(key: String, deleteFile: Boolean) {
         val item = _items.value.firstOrNull { it.key == key } ?: return
         scope.launch {
-            when (item.kind) {
-                Kind.TORRENT -> item.hash?.let {
-                    Native.invoke("torrent_remove", JSONObject().put("hash", it).put("delete_files", deleteFile))
-                }
-                else -> {
-                    if (item.engineId != 0L) {
-                        Native.invoke("http_cancel", JSONObject().put("id", item.engineId))
-                        Native.invoke("http_finish", JSONObject().put("id", item.engineId))
-                    }
-                    if (deleteFile) item.file?.let { File(it).delete() }
-                    item.stateFile?.let { File(it).delete() }
-                }
+            if (item.engineId != 0L) {
+                Native.invoke("http_cancel", JSONObject().put("id", item.engineId))
+                Native.invoke("http_finish", JSONObject().put("id", item.engineId))
             }
+            if (deleteFile) {
+                item.file?.let { File(it).delete() }
+                item.uri?.let { Files.deletePublic(app, it) }
+            }
+            item.stateFile?.let { File(it).delete() }
             _items.update { list -> list.filterNot { it.key == key } }
+            save()
+            schedule()
+        }
+    }
+
+    fun clearCompleted() {
+        scope.launch {
+            _items.update { list -> list.filterNot { it.status == Status.DONE } }
             save()
         }
     }
@@ -209,7 +257,6 @@ object Downloads {
     }
 
     private fun tick(item: Item) {
-        if (item.kind == Kind.TORRENT) return tickTorrent(item)
         if (item.engineId == 0L) return // still starting (a video's address is being asked for)
         val s = Native.invoke("http_snapshot", JSONObject().put("id", item.engineId))
         s.error()?.let { return fail(item.key, it) }
@@ -226,35 +273,25 @@ object Downloads {
             "Done" -> {
                 val r = Native.invoke("http_finish", JSONObject().put("id", item.engineId))
                 r.error()?.let { return fail(item.key, it) }
+                val path = r.getString("path")
+                // Android 10+: into the public Download/MDM folder, and the private copy goes.
+                val publicUri = Files.exportToPublicDownloads(app, File(path))
+                if (publicUri != null) File(path).delete()
                 change(item.key) {
-                    it.copy(status = Status.DONE, speed = 0, engineId = 0, file = r.getString("path"), done = r.getLong("size"), total = r.getLong("size"))
+                    it.copy(
+                        status = Status.DONE, speed = 0, engineId = 0,
+                        file = if (publicUri != null) null else path,
+                        uri = publicUri?.toString(),
+                        done = r.getLong("size"), total = r.getLong("size"),
+                    )
                 }
                 save()
+                schedule()
             }
             "Failed" -> {
                 Native.invoke("http_finish", JSONObject().put("id", item.engineId))
                 fail(item.key, s.optString("error").ifEmpty { "failed" })
             }
-        }
-    }
-
-    private fun tickTorrent(item: Item) {
-        val hash = item.hash ?: return
-        val s = Native.invoke("torrent_stats", JSONObject().put("hash", hash))
-        s.error()?.let { return } // not in the session yet
-        change(item.key) {
-            it.copy(
-                done = s.optLong("done"),
-                total = s.optLong("total"),
-                speed = s.optDouble("down_speed").toLong(),
-                status = when (s.optString("phase")) {
-                    "Finished" -> Status.DONE
-                    "Error" -> Status.FAILED
-                    "Paused" -> Status.PAUSED
-                    else -> Status.RUNNING
-                },
-                error = s.optString("error").ifEmpty { null },
-            )
         }
     }
 
@@ -265,8 +302,9 @@ object Downloads {
     }
 
     private fun fail(key: String, why: String) {
-        change(key) { it.copy(status = Status.FAILED, speed = 0, error = why) }
+        change(key) { it.copy(status = Status.FAILED, speed = 0, engineId = 0, error = why) }
         save()
+        schedule()
     }
 
     @Synchronized

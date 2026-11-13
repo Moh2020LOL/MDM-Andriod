@@ -66,7 +66,7 @@ class DownloadService : Service() {
             android.app.PendingIntent.FLAG_IMMUTABLE,
         )
         return NotificationCompat.Builder(this, CHANNEL)
-            .setSmallIcon(android.R.drawable.stat_sys_download)
+            .setSmallIcon(R.drawable.ic_stat_download)
             .setContentTitle(getString(R.string.app_name))
             .setContentText(getString(R.string.notification_summary, count, formatBytes(speed)))
             .setContentIntent(open)
