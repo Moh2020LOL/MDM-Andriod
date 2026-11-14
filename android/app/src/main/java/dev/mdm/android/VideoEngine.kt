@@ -8,6 +8,7 @@ import java.util.Locale
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import dev.mdm.android.Native.text
 import org.json.JSONObject
 
 /**
@@ -128,12 +129,12 @@ object VideoEngine {
         val found = Native.invoke("analyze", JSONObject().put("url", page).apply {
             referer?.let { put("headers", JSONObject().put("Referer", it)) }
         })
-        val err = found.optString("error").ifEmpty { null }
+        val err = found.text("error").ifEmpty { null }
         if (err != null) log.append("[analyzer] ").append(err).append("\n")
         val cands = found.optJSONArray("candidates")
         val hdr = found.optJSONObject("headers")
         val headers = LinkedHashMap<String, String>().apply { hdr?.keys()?.forEach { put(it, hdr.optString(it)) } }
-        val title = found.optString("title").ifEmpty { null }
+        val title = found.text("title").ifEmpty { null }
         if (cands != null) {
             for (i in 0 until cands.length()) {
                 if (key in stopped) return Outcome.Stopped

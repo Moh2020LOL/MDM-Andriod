@@ -32,8 +32,9 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = true
-            isShrinkResources = true
+            // R8 renamed classes youtubedl-android loads by name: yt-dlp failed to start ("M2.f"). Off.
+            isMinifyEnabled = false
+            isShrinkResources = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             // Signed with the debug key so the release APK installs on your own phone without a
             // keystore. For a store, put a real signingConfig here.

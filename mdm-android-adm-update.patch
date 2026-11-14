@@ -1,0 +1,2152 @@
+diff --git a/ROADMAP.md b/ROADMAP.md
+index 6272765..256c8d1 100644
+--- a/ROADMAP.md
++++ b/ROADMAP.md
+@@ -13,6 +13,8 @@ Everything below ships together, in version 0.5.0.
+ 
+ ### Done
+ 
++- ✅ Android: ADM-style layout, a Rust page analyzer for any site, yt-dlp downloading and merging itself with explained failures, optional floating button (not yet built on a phone)
++
+ - ✅ Menus on compositors that animate windows (Hyprland): no border and no slide-in, and going from
+   title to title moves one window, so nothing fades; the reporter confirmed it
+   ([#277](https://github.com/anefzaoui/misterdownloadmanager/issues/277))
+diff --git a/android/app/build.gradle.kts b/android/app/build.gradle.kts
+index 3094635..eb5467f 100644
+--- a/android/app/build.gradle.kts
++++ b/android/app/build.gradle.kts
+@@ -48,6 +48,9 @@ android {
+     kotlinOptions { jvmTarget = "17" }
+     buildFeatures { compose = true }
+ 
++    // Only English and Arabic have every text; the other languages fall back to English.
++    lint { disable += "MissingTranslation" }
++
+     packaging {
+         // youtubedl-android unpacks its Python and yt-dlp from the APK's native libraries.
+         jniLibs { useLegacyPackaging = true }
+diff --git a/android/app/src/main/AndroidManifest.xml b/android/app/src/main/AndroidManifest.xml
+index c45b032..2869d07 100644
+--- a/android/app/src/main/AndroidManifest.xml
++++ b/android/app/src/main/AndroidManifest.xml
+@@ -3,6 +3,9 @@
+ 
+     <uses-permission android:name="android.permission.INTERNET" />
+     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
++    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
++    <!-- Opening a downloaded .apk (the person still confirms the install). -->
++    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+     <uses-permission android:name="android.permission.WAKE_LOCK" />
+     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+@@ -65,6 +68,25 @@
+                 android:value="download_manager" />
+         </service>
+ 
++        <!-- OPTIONAL floating button over every app (Settings): tap = analyze the link in the clipboard. -->
++        <service
++            android:name=".BubbleService"
++            android:exported="false"
++            android:foregroundServiceType="specialUse">
++            <property
++                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
++                android:value="floating_download_button" />
++        </service>
++
++        <!-- Lives for a moment: reads the clipboard for the floating button (needs a window with focus). -->
++        <activity
++            android:name=".ClipActivity"
++            android:exported="false"
++            android:excludeFromRecents="true"
++            android:noHistory="true"
++            android:taskAffinity=""
++            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
++
+         <!-- OPTIONAL: reads browsers' address bars to notice video pages (res/xml/link_watcher.xml). -->
+         <service
+             android:name=".LinkWatcherService"
+diff --git a/android/app/src/main/java/dev/mdm/android/BubbleService.kt b/android/app/src/main/java/dev/mdm/android/BubbleService.kt
+new file mode 100644
+index 0000000..0012b1d
+--- /dev/null
++++ b/android/app/src/main/java/dev/mdm/android/BubbleService.kt
+@@ -0,0 +1,147 @@
++package dev.mdm.android
++
++import android.app.Notification
++import android.app.NotificationChannel
++import android.app.NotificationManager
++import android.app.Service
++import android.content.Context
++import android.content.Intent
++import android.content.pm.ServiceInfo
++import android.graphics.Color
++import android.graphics.PixelFormat
++import android.graphics.drawable.GradientDrawable
++import android.os.Build
++import android.os.IBinder
++import android.view.Gravity
++import android.view.MotionEvent
++import android.view.View
++import android.view.WindowManager
++import android.widget.TextView
++import androidx.core.app.NotificationCompat
++
++/**
++ * OPTIONAL (Settings → "Floating button"): a small round button that stays above every app. Tap it
++ * and the link in the clipboard is analyzed and added ([ClipActivity]); drag it anywhere. It needs
++ * "display over other apps" and a foreground service, so Android keeps it alive. Off by default.
++ */
++class BubbleService : Service() {
++    private var view: View? = null
++    private var wm: WindowManager? = null
++
++    override fun onBind(intent: Intent?): IBinder? = null
++
++    override fun onCreate() {
++        super.onCreate()
++        val nm = getSystemService(NotificationManager::class.java)
++        nm.createNotificationChannel(
++            NotificationChannel(CHANNEL, getString(R.string.bubble_channel), NotificationManager.IMPORTANCE_MIN),
++        )
++        val n: Notification = NotificationCompat.Builder(this, CHANNEL)
++            .setSmallIcon(R.drawable.ic_stat_download)
++            .setContentTitle(getString(R.string.bubble_notification))
++            .setOngoing(true)
++            .setPriority(NotificationCompat.PRIORITY_MIN)
++            .build()
++        if (Build.VERSION.SDK_INT >= 34) {
++            startForeground(ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
++        } else {
++            startForeground(ID, n)
++        }
++        if (!Permissions.canOverlay(this) || !addBubble()) stopSelf()
++    }
++
++    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
++
++    override fun onDestroy() {
++        view?.let { v -> runCatching { wm?.removeView(v) } }
++        view = null
++        super.onDestroy()
++    }
++
++    private fun addBubble(): Boolean {
++        val manager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
++        val size = dp(52)
++        val v = TextView(this).apply {
++            text = "⬇"
++            setTextColor(Color.WHITE)
++            textSize = 22f
++            gravity = Gravity.CENTER
++            background = GradientDrawable().apply {
++                shape = GradientDrawable.OVAL
++                setColor(Color.parseColor("#1E88E5"))
++            }
++            elevation = dp(6).toFloat()
++        }
++        val lp = WindowManager.LayoutParams(
++            size, size,
++            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
++            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
++            PixelFormat.TRANSLUCENT,
++        )
++        lp.gravity = Gravity.TOP or Gravity.LEFT
++        lp.x = dp(8)
++        lp.y = dp(240)
++        var downX = 0f
++        var downY = 0f
++        var moved = false
++        v.setOnTouchListener { _, e ->
++            when (e.action) {
++                MotionEvent.ACTION_DOWN -> {
++                    downX = e.rawX
++                    downY = e.rawY
++                    moved = false
++                    true
++                }
++                MotionEvent.ACTION_MOVE -> {
++                    val dx = e.rawX - downX
++                    val dy = e.rawY - downY
++                    if (kotlin.math.abs(dx) > dp(8) || kotlin.math.abs(dy) > dp(8)) moved = true
++                    if (moved) {
++                        lp.x += dx.toInt()
++                        lp.y += dy.toInt()
++                        downX = e.rawX
++                        downY = e.rawY
++                        runCatching { manager.updateViewLayout(v, lp) }
++                    }
++                    true
++                }
++                MotionEvent.ACTION_UP -> {
++                    if (!moved) {
++                        // Reading the clipboard needs a window with focus: a tiny transparent screen does it.
++                        startActivity(Intent(this, ClipActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
++                    }
++                    true
++                }
++                else -> false
++            }
++        }
++        return try {
++            manager.addView(v, lp)
++            wm = manager
++            view = v
++            true
++        } catch (e: Exception) {
++            false
++        }
++    }
++
++    private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
++
++    companion object {
++        private const val CHANNEL = "bubble"
++        private const val ID = 2
++
++        /** Starts or stops the button to match the setting and the permission. */
++        fun sync(context: Context) {
++            val app = context.applicationContext
++            val i = Intent(app, BubbleService::class.java)
++            if (Prefs.bubbleEnabled.value && Permissions.canOverlay(app)) {
++                runCatching {
++                    if (Build.VERSION.SDK_INT >= 26) app.startForegroundService(i) else app.startService(i)
++                }
++            } else {
++                app.stopService(i)
++            }
++        }
++    }
++}
+diff --git a/android/app/src/main/java/dev/mdm/android/ClipActivity.kt b/android/app/src/main/java/dev/mdm/android/ClipActivity.kt
+new file mode 100644
+index 0000000..4ff9ace
+--- /dev/null
++++ b/android/app/src/main/java/dev/mdm/android/ClipActivity.kt
+@@ -0,0 +1,42 @@
++package dev.mdm.android
++
++import android.app.Activity
++import android.content.ClipboardManager
++import android.os.Bundle
++import android.widget.Toast
++
++/**
++ * A transparent screen that lives for a moment: Android 10+ lets only the app in front read the
++ * clipboard, so the floating button opens this, reads the link, adds it (a web page is analyzed for
++ * its video) and closes.
++ */
++class ClipActivity : Activity() {
++    private var handled = false
++
++    override fun onCreate(savedInstanceState: Bundle?) {
++        super.onCreate(savedInstanceState)
++        Prefs.init(applicationContext)
++    }
++
++    override fun onWindowFocusChanged(hasFocus: Boolean) {
++        super.onWindowFocusChanged(hasFocus)
++        if (!hasFocus || handled) return
++        handled = true
++        val text = getSystemService(ClipboardManager::class.java).primaryClip
++            ?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(this)?.toString().orEmpty()
++        val link = firstLink(text)
++        if (link == null) {
++            Toast.makeText(this, R.string.clip_no_link, Toast.LENGTH_LONG).show()
++        } else {
++            val page = VideoDetector.videoPage(link) || VideoDetector.looksLikePage(link)
++            Downloads.add(link, video = page)
++            Toast.makeText(this, R.string.overlay_added, Toast.LENGTH_SHORT).show()
++        }
++        finish()
++    }
++}
++
++private val LINK = Regex("""https?://[^\s<>"']+""", RegexOption.IGNORE_CASE)
++
++/** The first web link inside shared or copied text ("Title https://…" shares are common). */
++fun firstLink(text: String): String? = LINK.find(text)?.value?.trimEnd('.', ',', ')', ']')
+diff --git a/android/app/src/main/java/dev/mdm/android/Downloads.kt b/android/app/src/main/java/dev/mdm/android/Downloads.kt
+index 572311f..46fce16 100644
+--- a/android/app/src/main/java/dev/mdm/android/Downloads.kt
++++ b/android/app/src/main/java/dev/mdm/android/Downloads.kt
+@@ -71,14 +71,14 @@ object Downloads {
+      * What the person typed, pasted, shared or caught in the browser. [video]: a web page for yt-dlp.
+      * [referer]: the page a browser download came from.
+      */
+-    fun add(text: String, video: Boolean = false, referer: String? = null) {
++    fun add(text: String, video: Boolean = false, referer: String? = null, audio: Boolean = false) {
+         val t = text.trim()
+         if (t.isEmpty()) return
+         scope.launch {
+             val key = UUID.randomUUID().toString()
+             val dir = saveDir.absolutePath
+             val item = if (video) {
+-                Item(key, Kind.VIDEO, t, page = t, dir = dir, title = t)
++                Item(key, Kind.VIDEO, t, page = t, dir = dir, title = t, referer = referer, audio = audio)
+             } else {
+                 Item(
+                     key, Kind.HTTP, t, dir = dir, referer = referer,
+@@ -147,18 +147,48 @@ object Downloads {
+     /** Starts (or starts again) what [item] is. [schedule] already marked it running. */
+     private fun begin(item: Item) {
+         when (item.kind) {
+-            Kind.VIDEO -> {
+-                // The stream's address is short-lived: always ask for a fresh one.
+-                val found = runCatching { VideoResolver.resolve(app, item.page ?: item.source) }
+-                    .getOrElse { return fail(item.key, it.message ?: "yt-dlp failed") }
+-                val name = found.title.replace(Regex("[\\\\/:*?\"<>|]"), "_") + "." + found.ext
+-                change(item.key) { it.copy(source = found.url, title = found.title) }
+-                beginHttp(item.copy(source = found.url), name, found.headers)
+-            }
++            Kind.VIDEO -> beginVideo(item)
+             Kind.HTTP -> beginHttp(item, null, emptyMap())
+         }
+     }
+ 
++    /**
++     * A page with a video: [VideoEngine] walks its ladder (yt-dlp, update, other clients, single
++     * file, the Rust page analyzer). A finished file is exported like any other; a plain file the
++     * analyzer found goes to the HTTP engine; a failure is explained and kept with its details.
++     */
++    private fun beginVideo(item: Item) {
++        var lastUi = 0L
++        val outcome = VideoEngine.run(
++            app, item.key, item.page ?: item.source, File(item.dir), item.audio, item.referer,
++        ) { p ->
++            val now = System.currentTimeMillis()
++            if (now - lastUi < 400 || !stillRunning(item.key)) return@run
++            lastUi = now
++            change(item.key) {
++                it.copy(
++                    done = if (p.total > 0) (p.total * p.pct / 100f).toLong() else it.done,
++                    total = if (p.total > 0) p.total else it.total,
++                    speed = p.speed,
++                    title = p.title?.takeIf { t -> t.isNotBlank() } ?: it.title,
++                )
++            }
++        }
++        when (outcome) {
++            is VideoEngine.Outcome.Stopped -> Unit // paused or removed: pause()/remove() did the rest
++            is VideoEngine.Outcome.Failed -> if (stillRunning(item.key)) fail(item.key, outcome.short, outcome.detail)
++            is VideoEngine.Outcome.File -> {
++                val size = outcome.path.length()
++                change(item.key) { it.copy(title = outcome.path.name, speed = 0, done = size, total = size) }
++                finishExport(item.key, outcome.path.absolutePath, size)
++            }
++            is VideoEngine.Outcome.Direct -> {
++                change(item.key) { it.copy(source = outcome.url, title = outcome.title ?: it.title) }
++                beginHttp(item.copy(source = outcome.url), null, outcome.headers)
++            }
++        }
++    }
++
+     /** [extra]: what yt-dlp sent to find a video's stream; the stream's address is only good with it. */
+     private fun headersFor(item: Item, extra: Map<String, String>): JSONObject {
+         val h = JSONObject()
+@@ -195,6 +225,7 @@ object Downloads {
+         val item = _items.value.firstOrNull { it.key == key } ?: return
+         // First the status, so the poll stops looking at it before the engine lets go of it.
+         change(key) { it.copy(status = Status.PAUSED, speed = 0) }
++        if (item.kind == Kind.VIDEO) VideoEngine.stop(key)
+         scope.launch {
+             if (item.engineId != 0L) {
+                 Native.invoke("http_cancel", JSONObject().put("id", item.engineId))
+@@ -209,7 +240,7 @@ object Downloads {
+ 
+     fun resume(key: String) {
+         scope.launch {
+-            change(key) { it.copy(status = Status.QUEUED, error = null) }
++            change(key) { it.copy(status = Status.QUEUED, error = null, detail = null) }
+             save()
+             schedule()
+         }
+@@ -225,6 +256,7 @@ object Downloads {
+         val item = _items.value.firstOrNull { it.key == key } ?: return
+         // Out of the list first (same reason as in pause).
+         _items.update { list -> list.filterNot { it.key == key } }
++        if (item.kind == Kind.VIDEO) VideoEngine.stop(key)
+         scope.launch {
+             if (item.engineId != 0L) {
+                 Native.invoke("http_cancel", JSONObject().put("id", item.engineId))
+@@ -323,8 +355,8 @@ object Downloads {
+         _items.update { list -> list.map { if (it.key == key) f(it) else it } }
+     }
+ 
+-    private fun fail(key: String, why: String) {
+-        change(key) { it.copy(status = Status.FAILED, speed = 0, engineId = 0, error = why) }
++    private fun fail(key: String, why: String, detail: String? = null) {
++        change(key) { it.copy(status = Status.FAILED, speed = 0, engineId = 0, error = why, detail = detail ?: why) }
+         save()
+         schedule()
+     }
+diff --git a/android/app/src/main/java/dev/mdm/android/Item.kt b/android/app/src/main/java/dev/mdm/android/Item.kt
+index 796575c..f124840 100644
+--- a/android/app/src/main/java/dev/mdm/android/Item.kt
++++ b/android/app/src/main/java/dev/mdm/android/Item.kt
+@@ -37,6 +37,10 @@ data class Item(
+     val referer: String? = null,
+     val added: Long = System.currentTimeMillis(),
+     val error: String? = null,
++    /** The raw technical text of the failure (yt-dlp's output): shown under "Details", copyable. */
++    val detail: String? = null,
++    /** A video page downloaded as sound only (MP3). */
++    val audio: Boolean = false,
+ ) {
+     val fraction: Float get() = if (total > 0) (done.toFloat() / total).coerceIn(0f, 1f) else 0f
+ 
+@@ -50,7 +54,7 @@ data class Item(
+         .put("dir", dir).put("title", title).put("status", status.name)
+         .put("done", done).put("total", total)
+         .put("stateFile", stateFile).put("file", file).put("uri", uri).put("referer", referer)
+-        .put("added", added).put("error", error)
++        .put("added", added).put("error", error).put("detail", detail).put("audio", audio)
+ 
+     companion object {
+         fun fromJson(o: JSONObject): Item = Item(
+@@ -70,6 +74,8 @@ data class Item(
+             referer = o.optString("referer").ifEmpty { null },
+             added = o.optLong("added", System.currentTimeMillis()),
+             error = o.optString("error").ifEmpty { null },
++            detail = o.optString("detail").ifEmpty { null },
++            audio = o.optBoolean("audio", false),
+         )
+ 
+         fun listFromJson(text: String): List<Item> {
+diff --git a/android/app/src/main/java/dev/mdm/android/LinkWatcherService.kt b/android/app/src/main/java/dev/mdm/android/LinkWatcherService.kt
+index 0fc1059..edc7bc5 100644
+--- a/android/app/src/main/java/dev/mdm/android/LinkWatcherService.kt
++++ b/android/app/src/main/java/dev/mdm/android/LinkWatcherService.kt
+@@ -3,6 +3,12 @@ package dev.mdm.android
+ import android.accessibilityservice.AccessibilityService
+ import android.view.accessibility.AccessibilityEvent
+ import android.view.accessibility.AccessibilityNodeInfo
++import kotlinx.coroutines.CoroutineScope
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.SupervisorJob
++import kotlinx.coroutines.cancel
++import kotlinx.coroutines.launch
++import org.json.JSONObject
+ 
+ /**
+  * OPTIONAL. Watches the address bar of the phone's browsers and, when the page is a video page
+@@ -17,6 +23,8 @@ import android.view.accessibility.AccessibilityNodeInfo
+ class LinkWatcherService : AccessibilityService() {
+     private var lastUrl = ""
+     private var lastAt = 0L
++    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
++    private val analyzed = HashSet<String>()
+ 
+     override fun onServiceConnected() {
+         super.onServiceConnected()
+@@ -37,12 +45,33 @@ class LinkWatcherService : AccessibilityService() {
+         val now = System.currentTimeMillis()
+         // The browser fires many events for one page: the same address counts once a minute.
+         if (url == lastUrl && now - lastAt < 60_000) return
+-        val match = VideoDetector.classify(url) ?: return
++        val match = VideoDetector.classify(url)
+         lastUrl = url
+         lastAt = now
++        if (match == null) {
++            // Deep detection (optional, off by default): ANY page is read by the Rust analyzer,
++            // so a site nobody wrote an extractor for still gets the "video found" window.
++            if (Prefs.deepDetect.value && VideoDetector.looksLikePage(url)) deepCheck(url)
++            return
++        }
+         Overlay.show(this, url, video = match == VideoDetector.Match.PAGE)
+     }
+ 
++    private fun deepCheck(url: String) {
++        if (analyzed.size > 200) analyzed.clear()
++        if (!analyzed.add(url)) return
++        scope.launch {
++            val r = Native.invoke("analyze", JSONObject().put("url", url))
++            val c = r.optJSONArray("candidates")
++            if (c != null && c.length() > 0) Overlay.show(applicationContext, url, video = true)
++        }
++    }
++
++    override fun onDestroy() {
++        scope.cancel()
++        super.onDestroy()
++    }
++
+     override fun onInterrupt() {}
+ 
+     /**
+diff --git a/android/app/src/main/java/dev/mdm/android/MainActivity.kt b/android/app/src/main/java/dev/mdm/android/MainActivity.kt
+index a90759d..d0ba882 100644
+--- a/android/app/src/main/java/dev/mdm/android/MainActivity.kt
++++ b/android/app/src/main/java/dev/mdm/android/MainActivity.kt
+@@ -1,5 +1,6 @@
+ package dev.mdm.android
+ 
++import android.content.ClipboardManager
+ import android.content.Intent
+ import android.os.Bundle
+ import androidx.activity.ComponentActivity
+@@ -52,6 +53,29 @@ class MainActivity : ComponentActivity() {
+         }
+     }
+ 
++    /** The link last offered from the clipboard, so the same one is not offered twice. */
++    private var lastClip: String? = null
++
++    override fun onResume() {
++        super.onResume()
++        BubbleService.sync(this)
++    }
++
++    // Android 10+ lets only the focused app read the clipboard: a copied link is offered right away.
++    override fun onWindowFocusChanged(hasFocus: Boolean) {
++        super.onWindowFocusChanged(hasFocus)
++        if (!hasFocus || incoming != null) return
++        val text = runCatching {
++            getSystemService(ClipboardManager::class.java).primaryClip
++                ?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(this)?.toString()
++        }.getOrNull().orEmpty()
++        val link = firstLink(text) ?: return
++        if (link != lastClip) {
++            lastClip = link
++            incoming = link
++        }
++    }
++
+     override fun onNewIntent(intent: Intent) {
+         super.onNewIntent(intent)
+         handle(intent)
+@@ -61,7 +85,7 @@ class MainActivity : ComponentActivity() {
+         intent ?: return
+         when (intent.action) {
+             Intent.ACTION_VIEW -> incoming = intent.data?.toString()
+-            Intent.ACTION_SEND -> incoming = intent.getStringExtra(Intent.EXTRA_TEXT)
++            Intent.ACTION_SEND -> incoming = intent.getStringExtra(Intent.EXTRA_TEXT)?.let { firstLink(it) ?: it }
+         }
+     }
+ }
+diff --git a/android/app/src/main/java/dev/mdm/android/Prefs.kt b/android/app/src/main/java/dev/mdm/android/Prefs.kt
+index a796f46..81fe2c2 100644
+--- a/android/app/src/main/java/dev/mdm/android/Prefs.kt
++++ b/android/app/src/main/java/dev/mdm/android/Prefs.kt
+@@ -24,7 +24,7 @@ enum class ThemeChoice(val id: String) {
+     SYSTEM("system"), LIGHT("light"), DARK("dark");
+ 
+     companion object {
+-        fun fromId(id: String?): ThemeChoice = entries.firstOrNull { it.id == id } ?: SYSTEM
++        fun fromId(id: String?): ThemeChoice = entries.firstOrNull { it.id == id } ?: DARK
+     }
+ }
+ 
+@@ -48,7 +48,15 @@ object Prefs {
+     private val _overlayEnabled = MutableStateFlow(true)
+     val overlayEnabled: StateFlow<Boolean> = _overlayEnabled
+ 
+-    private val _theme = MutableStateFlow(ThemeChoice.SYSTEM)
++    /** A small always-visible floating button: tap it and the link in the clipboard is analyzed. Off by default. */
++    private val _bubbleEnabled = MutableStateFlow(false)
++    val bubbleEnabled: StateFlow<Boolean> = _bubbleEnabled
++
++    /** Deep detection: the address-bar watcher analyzes ANY page (not only known video sites). Off by default. */
++    private val _deepDetect = MutableStateFlow(false)
++    val deepDetect: StateFlow<Boolean> = _deepDetect
++
++    private val _theme = MutableStateFlow(ThemeChoice.DARK)
+     val theme: StateFlow<ThemeChoice> = _theme
+ 
+     private val _onboardingDone = MutableStateFlow(false)
+@@ -61,6 +69,8 @@ object Prefs {
+         _snail.value = prefs.getBoolean("snail", false)
+         _overlayEnabled.value = prefs.getBoolean("overlay", true)
+         _theme.value = ThemeChoice.fromId(prefs.getString("theme", null))
++        _bubbleEnabled.value = prefs.getBoolean("bubble", false)
++        _deepDetect.value = prefs.getBoolean("deep_detect", false)
+         _onboardingDone.value = prefs.getBoolean("onboarding_done", false)
+     }
+ 
+@@ -79,6 +89,16 @@ object Prefs {
+         prefs.edit().putBoolean("overlay", on).apply()
+     }
+ 
++    fun setBubbleEnabled(on: Boolean) {
++        _bubbleEnabled.value = on
++        prefs.edit().putBoolean("bubble", on).apply()
++    }
++
++    fun setDeepDetect(on: Boolean) {
++        _deepDetect.value = on
++        prefs.edit().putBoolean("deep_detect", on).apply()
++    }
++
+     fun setTheme(t: ThemeChoice) {
+         _theme.value = t
+         prefs.edit().putString("theme", t.id).apply()
+diff --git a/android/app/src/main/java/dev/mdm/android/Screens.kt b/android/app/src/main/java/dev/mdm/android/Screens.kt
+index ce873d1..6a29df5 100644
+--- a/android/app/src/main/java/dev/mdm/android/Screens.kt
++++ b/android/app/src/main/java/dev/mdm/android/Screens.kt
+@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.width
+ import androidx.compose.foundation.lazy.LazyColumn
+ import androidx.compose.foundation.lazy.items
+ import androidx.compose.foundation.rememberScrollState
++import androidx.compose.foundation.text.selection.SelectionContainer
+ import androidx.compose.foundation.shape.CircleShape
+ import androidx.compose.foundation.shape.RoundedCornerShape
+ import androidx.compose.foundation.verticalScroll
+@@ -31,6 +32,13 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
+ import androidx.compose.material.icons.filled.Add
+ import androidx.compose.material.icons.filled.Android
+ import androidx.compose.material.icons.filled.Close
++import androidx.compose.material.icons.filled.ClearAll
++import androidx.compose.material.icons.filled.ContentPaste
++import androidx.compose.material.icons.filled.Download
++import androidx.compose.material.icons.filled.Language
++import androidx.compose.material.icons.filled.Pause
++import androidx.compose.material.icons.filled.PlayArrow
++import androidx.compose.material.icons.filled.Settings
+ import androidx.compose.material.icons.filled.Description
+ import androidx.compose.material.icons.filled.FolderZip
+ import androidx.compose.material.icons.filled.Image
+@@ -44,7 +52,13 @@ import androidx.compose.material3.AlertDialog
+ import androidx.compose.material3.Button
+ import androidx.compose.material3.Card
+ import androidx.compose.material3.Checkbox
++import androidx.compose.material3.DrawerValue
+ import androidx.compose.material3.DropdownMenu
++import androidx.compose.material3.ModalDrawerSheet
++import androidx.compose.material3.ModalNavigationDrawer
++import androidx.compose.material3.NavigationDrawerItem
++import androidx.compose.material3.NavigationDrawerItemDefaults
++import androidx.compose.material3.rememberDrawerState
+ import androidx.compose.material3.DropdownMenuItem
+ import androidx.compose.material3.ExperimentalMaterial3Api
+ import androidx.compose.material3.FloatingActionButton
+@@ -70,6 +84,7 @@ import androidx.compose.runtime.getValue
+ import androidx.compose.runtime.mutableIntStateOf
+ import androidx.compose.runtime.mutableStateOf
+ import androidx.compose.runtime.remember
++import androidx.compose.runtime.rememberCoroutineScope
+ import androidx.compose.runtime.setValue
+ import androidx.compose.ui.Alignment
+ import androidx.compose.ui.Modifier
+@@ -85,9 +100,11 @@ import androidx.compose.ui.unit.sp
+ import androidx.lifecycle.Lifecycle
+ import androidx.lifecycle.compose.LifecycleEventEffect
+ import androidx.lifecycle.compose.collectAsStateWithLifecycle
++import kotlinx.coroutines.launch
+ 
+ // ======================================================================================
+-// The list: top bar with the speed-mode chip, tabs All / Active / Completed, search, rows
++// The list, laid out like a phone download manager: a side drawer with the categories (videos,
++// music, documents ...), tabs Downloading / Completed, a progress bar on every row, a + button.
+ // ======================================================================================
+ 
+ @OptIn(ExperimentalMaterial3Api::class)
+@@ -97,121 +114,130 @@ fun DownloadsScreen(onBrowser: () -> Unit, onSettings: () -> Unit, prefill: Stri
+     val mode by Prefs.speedMode.collectAsStateWithLifecycle()
+     val snail by Prefs.snail.collectAsStateWithLifecycle()
+     var tab by remember { mutableIntStateOf(0) }
++    var category by remember { mutableStateOf<FileType?>(null) }
+     var searching by remember { mutableStateOf(false) }
+     var query by remember { mutableStateOf("") }
+-    var menuOpen by remember { mutableStateOf(false) }
+     var speedOpen by remember { mutableStateOf(false) }
+     var adding by remember { mutableStateOf(false) }
++    val drawer = rememberDrawerState(DrawerValue.Closed)
++    val scope = rememberCoroutineScope()
+ 
+     val shown = items
+-        .filter {
+-            when (tab) {
+-                0 -> true
+-                1 -> it.status != Status.DONE
+-                else -> it.status == Status.DONE
+-            }
+-        }
++        .filter { if (tab == 0) it.status != Status.DONE else it.status == Status.DONE }
++        .filter { category == null || it.type == category }
+         .filter { query.isBlank() || it.title.contains(query, ignoreCase = true) }
+ 
+-    Scaffold(
+-        topBar = {
+-            Column {
+-                TopAppBar(
+-                    title = {
+-                        if (searching) {
+-                            TextField(
+-                                value = query,
+-                                onValueChange = { query = it },
+-                                singleLine = true,
+-                                placeholder = { Text(stringResource(R.string.search_hint)) },
+-                                modifier = Modifier.fillMaxWidth(),
+-                            )
+-                        } else {
+-                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+-                                Text(stringResource(R.string.app_name), fontSize = 17.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+-                                ModeChip(mode, snail) { speedOpen = true }
+-                            }
+-                        }
+-                    },
+-                    navigationIcon = {
+-                        Box {
+-                            IconButton(onClick = { menuOpen = true }) { Icon(Icons.Filled.Menu, null) }
+-                            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+-                                DropdownMenuItem(text = { Text(stringResource(R.string.menu_browser)) }, onClick = { menuOpen = false; onBrowser() })
+-                                DropdownMenuItem(text = { Text(stringResource(R.string.menu_pause_all)) }, onClick = { menuOpen = false; Downloads.pauseAll() })
+-                                DropdownMenuItem(text = { Text(stringResource(R.string.menu_resume_all)) }, onClick = { menuOpen = false; Downloads.resumeAll() })
+-                                DropdownMenuItem(text = { Text(stringResource(R.string.menu_clear_completed)) }, onClick = { menuOpen = false; Downloads.clearCompleted() })
+-                                DropdownMenuItem(text = { Text(stringResource(R.string.menu_settings)) }, onClick = { menuOpen = false; onSettings() })
+-                            }
+-                        }
+-                    },
+-                    actions = {
+-                        IconButton(onClick = { searching = !searching; if (!searching) query = "" }) {
+-                            Icon(if (searching) Icons.Filled.Close else Icons.Filled.Search, stringResource(R.string.search))
++    fun closeThen(action: () -> Unit) {
++        scope.launch { drawer.close() }
++        action()
++    }
++
++    ModalNavigationDrawer(
++        drawerState = drawer,
++        drawerContent = {
++            ModalDrawerSheet {
++                Column(Modifier.verticalScroll(rememberScrollState()).padding(vertical = 12.dp)) {
++                    Text(
++                        stringResource(R.string.app_name),
++                        fontSize = 20.sp, fontWeight = FontWeight.Bold,
++                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp),
++                    )
++                    DrawerEntry(Icons.Filled.Download, stringResource(R.string.drawer_downloads), items.size, category == null) {
++                        closeThen { category = null }
++                    }
++                    listOf(
++                        Triple(FileType.VIDEO, Icons.Filled.Movie, R.string.cat_video),
++                        Triple(FileType.AUDIO, Icons.Filled.MusicNote, R.string.cat_audio),
++                        Triple(FileType.DOCUMENT, Icons.Filled.Description, R.string.cat_documents),
++                        Triple(FileType.APP, Icons.Filled.Android, R.string.cat_apps),
++                        Triple(FileType.ARCHIVE, Icons.Filled.FolderZip, R.string.cat_archives),
++                        Triple(FileType.IMAGE, Icons.Filled.Image, R.string.cat_images),
++                        Triple(FileType.OTHER, Icons.Filled.InsertDriveFile, R.string.cat_other),
++                    ).forEach { (type, icon, label) ->
++                        DrawerEntry(icon, stringResource(label), items.count { it.type == type }, category == type) {
++                            closeThen { category = type }
+                         }
+-                    },
+-                    colors = TopAppBarDefaults.topAppBarColors(
+-                        containerColor = MdmColors.Blue,
+-                        titleContentColor = Color.White,
+-                        navigationIconContentColor = Color.White,
+-                        actionIconContentColor = Color.White,
+-                    ),
+-                )
+-                TabRow(
+-                    selectedTabIndex = tab,
+-                    containerColor = MdmColors.Blue,
+-                    contentColor = Color.White,
+-                    indicator = {},
+-                    divider = {},
+-                ) {
+-                    listOf(R.string.tab_all, R.string.tab_active, R.string.tab_completed).forEachIndexed { index, label ->
+-                        Tab(
+-                            selected = tab == index,
+-                            onClick = { tab = index },
+-                            text = {
+-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+-                                    Text(
+-                                        stringResource(label),
+-                                        fontSize = 13.sp,
+-                                        fontWeight = if (tab == index) FontWeight.Bold else FontWeight.Normal,
+-                                        color = Color.White.copy(alpha = if (tab == index) 1f else 0.7f),
+-                                    )
+-                                    Spacer(Modifier.height(4.dp))
+-                                    Box(
+-                                        Modifier.width(28.dp).height(3.dp)
+-                                            .background(if (tab == index) Color.White else Color.Transparent),
+-                                    )
+-                                }
+-                            },
+-                        )
+                     }
++                    HorizontalDivider(Modifier.padding(vertical = 8.dp))
++                    DrawerEntry(Icons.Filled.Language, stringResource(R.string.menu_browser), null, false) { closeThen(onBrowser) }
++                    DrawerEntry(Icons.Filled.Pause, stringResource(R.string.menu_pause_all), null, false) { closeThen { Downloads.pauseAll() } }
++                    DrawerEntry(Icons.Filled.PlayArrow, stringResource(R.string.menu_resume_all), null, false) { closeThen { Downloads.resumeAll() } }
++                    DrawerEntry(Icons.Filled.ClearAll, stringResource(R.string.menu_clear_completed), null, false) { closeThen { Downloads.clearCompleted() } }
++                    DrawerEntry(Icons.Filled.Settings, stringResource(R.string.menu_settings), null, false) { closeThen(onSettings) }
+                 }
+             }
+         },
+-        floatingActionButton = {
+-            FloatingActionButton(onClick = { adding = true }, containerColor = MdmColors.Blue, contentColor = Color.White, shape = CircleShape) {
+-                Icon(Icons.Filled.Add, stringResource(R.string.add_title))
+-            }
+-        },
+-    ) { padding ->
+-        if (shown.isEmpty()) {
+-            Box(Modifier.fillMaxSize().padding(padding).padding(32.dp), contentAlignment = Alignment.Center) {
+-                Text(
+-                    stringResource(
+-                        when (tab) {
+-                            0 -> R.string.empty_all
+-                            1 -> R.string.empty_active
+-                            else -> R.string.empty_completed
++    ) {
++        Scaffold(
++            topBar = {
++                Column {
++                    TopAppBar(
++                        title = {
++                            if (searching) {
++                                TextField(
++                                    value = query,
++                                    onValueChange = { query = it },
++                                    singleLine = true,
++                                    placeholder = { Text(stringResource(R.string.search_hint)) },
++                                    modifier = Modifier.fillMaxWidth(),
++                                )
++                            } else {
++                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
++                                    Text(stringResource(R.string.app_name), fontSize = 17.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
++                                    ModeChip(mode, snail) { speedOpen = true }
++                                }
++                            }
+                         },
+-                    ),
+-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+-                )
+-            }
+-        } else {
+-            LazyColumn(Modifier.fillMaxSize().padding(padding)) {
+-                items(shown, key = { it.key }) {
+-                    DownloadRow(it)
+-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
++                        navigationIcon = {
++                            IconButton(onClick = { scope.launch { drawer.open() } }) { Icon(Icons.Filled.Menu, null) }
++                        },
++                        actions = {
++                            IconButton(onClick = { searching = !searching; if (!searching) query = "" }) {
++                                Icon(if (searching) Icons.Filled.Close else Icons.Filled.Search, stringResource(R.string.search))
++                            }
++                            IconButton(onClick = onBrowser) { Icon(Icons.Filled.Language, stringResource(R.string.menu_browser)) }
++                        },
++                        colors = TopAppBarDefaults.topAppBarColors(
++                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
++                            titleContentColor = MaterialTheme.colorScheme.onSurface,
++                            navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
++                            actionIconContentColor = MaterialTheme.colorScheme.onSurface,
++                        ),
++                    )
++                    TabRow(
++                        selectedTabIndex = tab,
++                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
++                        contentColor = MaterialTheme.colorScheme.primary,
++                    ) {
++                        listOf(R.string.tab_downloading, R.string.tab_completed).forEachIndexed { index, label ->
++                            Tab(
++                                selected = tab == index,
++                                onClick = { tab = index },
++                                text = { Text(stringResource(label), fontWeight = if (tab == index) FontWeight.Bold else FontWeight.Normal) },
++                            )
++                        }
++                    }
++                }
++            },
++            floatingActionButton = {
++                FloatingActionButton(onClick = { adding = true }, containerColor = MaterialTheme.colorScheme.primary, contentColor = Color.White, shape = CircleShape) {
++                    Icon(Icons.Filled.Add, stringResource(R.string.add_title))
++                }
++            },
++        ) { padding ->
++            if (shown.isEmpty()) {
++                Box(Modifier.fillMaxSize().padding(padding).padding(32.dp), contentAlignment = Alignment.Center) {
++                    Text(
++                        stringResource(if (tab == 0) R.string.empty_active else R.string.empty_completed),
++                        color = MaterialTheme.colorScheme.onSurfaceVariant,
++                    )
++                }
++            } else {
++                LazyColumn(Modifier.fillMaxSize().padding(padding)) {
++                    items(shown, key = { it.key }) {
++                        DownloadRow(it)
++                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
++                    }
+                 }
+             }
+         }
+@@ -221,12 +247,24 @@ fun DownloadsScreen(onBrowser: () -> Unit, onSettings: () -> Unit, prefill: Stri
+         AddDialog(
+             initial = prefill.orEmpty(),
+             onDismiss = { adding = false; onPrefillHandled() },
+-            onAdd = { text, video -> Downloads.add(text, video); adding = false; onPrefillHandled() },
++            onAdd = { text, video, audio -> Downloads.add(text, video, audio = audio); adding = false; onPrefillHandled() },
+         )
+     }
+     if (speedOpen) SpeedDialog(onDismiss = { speedOpen = false })
+ }
+ 
++@Composable
++private fun DrawerEntry(icon: ImageVector, label: String, count: Int?, selected: Boolean, onClick: () -> Unit) {
++    NavigationDrawerItem(
++        icon = { Icon(icon, null) },
++        label = { Text(label) },
++        badge = { if (count != null && count > 0) Text(count.toString()) },
++        selected = selected,
++        onClick = onClick,
++        modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
++    )
++}
++
+ @Composable
+ private fun ModeChip(mode: SpeedMode, snail: Boolean, onClick: () -> Unit) {
+     val (label, color) = when {
+@@ -251,6 +289,7 @@ private fun DownloadRow(item: Item) {
+     val context = LocalContext.current
+     var menu by remember { mutableStateOf(false) }
+     var confirmRemove by remember { mutableStateOf(false) }
++    var showDetails by remember { mutableStateOf(false) }
+ 
+     Row(
+         Modifier.fillMaxWidth()
+@@ -274,10 +313,18 @@ private fun DownloadRow(item: Item) {
+             Text(
+                 if (failed && item.error != null) item.error else statusLine(item),
+                 fontSize = 12.sp,
+-                maxLines = 1,
++                maxLines = if (failed) 4 else 1,
+                 overflow = TextOverflow.Ellipsis,
+                 color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+             )
++            if (failed) {
++                Row {
++                    TextButton(onClick = { Downloads.resume(item.key) }) { Text(stringResource(R.string.retry)) }
++                    if (item.detail != null) {
++                        TextButton(onClick = { showDetails = true }) { Text(stringResource(R.string.details)) }
++                    }
++                }
++            }
+             if (item.status != Status.DONE) {
+                 LinearProgressIndicator(
+                     progress = { item.fraction },
+@@ -314,6 +361,26 @@ private fun DownloadRow(item: Item) {
+         }
+     }
+ 
++    if (showDetails && item.detail != null) {
++        AlertDialog(
++            onDismissRequest = { showDetails = false },
++            title = { Text(stringResource(R.string.details)) },
++            text = {
++                SelectionContainer {
++                    Text(item.detail, fontSize = 11.sp, modifier = Modifier.verticalScroll(rememberScrollState()))
++                }
++            },
++            confirmButton = {
++                TextButton(onClick = {
++                    context.getSystemService(ClipboardManager::class.java)
++                        .setPrimaryClip(ClipData.newPlainText("details", item.detail))
++                    Toast.makeText(context, R.string.details_copied, Toast.LENGTH_SHORT).show()
++                }) { Text(stringResource(R.string.details_copy)) }
++            },
++            dismissButton = { TextButton(onClick = { showDetails = false }) { Text(stringResource(R.string.ok)) } },
++        )
++    }
++
+     if (confirmRemove) {
+         AlertDialog(
+             onDismissRequest = { confirmRemove = false },
+@@ -379,10 +446,13 @@ private fun formatEta(seconds: Long): String = when {
+ }
+ 
+ @Composable
+-private fun AddDialog(initial: String, onDismiss: () -> Unit, onAdd: (String, Boolean) -> Unit) {
+-    var text by remember { mutableStateOf(initial) }
+-    // A link the detector knows as a video page is ticked for the person.
+-    var video by remember { mutableStateOf(VideoDetector.videoPage(initial)) }
++private fun AddDialog(initial: String, onDismiss: () -> Unit, onAdd: (String, Boolean, Boolean) -> Unit) {
++    val context = LocalContext.current
++    var text by remember { mutableStateOf(firstLink(initial) ?: initial) }
++    // A known video site, or any link that looks like a web page, is ticked: the page is analyzed.
++    fun page(t: String) = VideoDetector.videoPage(t) || VideoDetector.looksLikePage(t)
++    var video by remember { mutableStateOf(page(text.trim())) }
++    var audio by remember { mutableStateOf(false) }
+     AlertDialog(
+         onDismissRequest = onDismiss,
+         title = { Text(stringResource(R.string.add_title)) },
+@@ -390,17 +460,30 @@ private fun AddDialog(initial: String, onDismiss: () -> Unit, onAdd: (String, Bo
+             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                 OutlinedTextField(
+                     value = text,
+-                    onValueChange = { text = it; video = VideoDetector.videoPage(it.trim()) },
++                    onValueChange = { text = it; video = page(it.trim()) },
+                     label = { Text(stringResource(R.string.add_hint)) },
+                     modifier = Modifier.fillMaxWidth(),
++                    trailingIcon = {
++                        IconButton(onClick = {
++                            val clip = context.getSystemService(ClipboardManager::class.java).primaryClip
++                                ?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()
++                            firstLink(clip)?.let { text = it; video = page(it) }
++                        }) { Icon(Icons.Filled.ContentPaste, stringResource(R.string.paste_link)) }
++                    },
+                 )
+                 Row(verticalAlignment = Alignment.CenterVertically) {
+                     Checkbox(checked = video, onCheckedChange = { video = it })
+-                    Text(stringResource(R.string.add_video))
++                    Text(stringResource(R.string.add_analyze), fontSize = 14.sp)
++                }
++                if (video) {
++                    Row(verticalAlignment = Alignment.CenterVertically) {
++                        Checkbox(checked = audio, onCheckedChange = { audio = it })
++                        Text(stringResource(R.string.add_audio), fontSize = 14.sp)
++                    }
+                 }
+             }
+         },
+-        confirmButton = { Button(onClick = { onAdd(text, video) }) { Text(stringResource(R.string.add_button)) } },
++        confirmButton = { Button(onClick = { onAdd(firstLink(text) ?: text, video, video && audio) }) { Text(stringResource(R.string.add_button)) } },
+         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
+     )
+ }
+@@ -471,6 +554,8 @@ fun SettingsScreen(onBack: () -> Unit, onPermissions: () -> Unit) {
+     val context = LocalContext.current
+     val theme by Prefs.theme.collectAsStateWithLifecycle()
+     val overlay by Prefs.overlayEnabled.collectAsStateWithLifecycle()
++    val bubble by Prefs.bubbleEnabled.collectAsStateWithLifecycle()
++    val deep by Prefs.deepDetect.collectAsStateWithLifecycle()
+     var speedOpen by remember { mutableStateOf(false) }
+     var tick by remember { mutableIntStateOf(0) }
+     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { tick++ }
+@@ -484,9 +569,9 @@ fun SettingsScreen(onBack: () -> Unit, onPermissions: () -> Unit) {
+             title = { Text(stringResource(R.string.settings_title)) },
+             navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back)) } },
+             colors = TopAppBarDefaults.topAppBarColors(
+-                containerColor = MdmColors.Blue,
+-                titleContentColor = Color.White,
+-                navigationIconContentColor = Color.White,
++                containerColor = MaterialTheme.colorScheme.surfaceVariant,
++                titleContentColor = MaterialTheme.colorScheme.onSurface,
++                navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
+             ),
+         )
+         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+@@ -504,6 +589,26 @@ fun SettingsScreen(onBack: () -> Unit, onPermissions: () -> Unit) {
+                     Permissions.settingsIntent(context, Permissions.Kind.OVERLAY)?.let { context.startActivity(it) }
+                 }) { Text(stringResource(R.string.perm_allow)) }
+             }
++            Row(verticalAlignment = Alignment.CenterVertically) {
++                Column(Modifier.weight(1f)) {
++                    Text(stringResource(R.string.settings_deep))
++                    Text(stringResource(R.string.settings_deep_desc), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
++                }
++                Switch(checked = deep, onCheckedChange = { Prefs.setDeepDetect(it) })
++            }
++            Row(verticalAlignment = Alignment.CenterVertically) {
++                Column(Modifier.weight(1f)) {
++                    Text(stringResource(R.string.settings_bubble))
++                    Text(stringResource(R.string.settings_bubble_desc), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
++                }
++                Switch(checked = bubble, onCheckedChange = {
++                    Prefs.setBubbleEnabled(it)
++                    BubbleService.sync(context)
++                    if (it && !canOverlay) {
++                        Permissions.settingsIntent(context, Permissions.Kind.OVERLAY)?.let { i -> context.startActivity(i) }
++                    }
++                })
++            }
+             HorizontalDivider()
+ 
+             SectionTitle(R.string.settings_speed)
+diff --git a/android/app/src/main/java/dev/mdm/android/Theme.kt b/android/app/src/main/java/dev/mdm/android/Theme.kt
+index 9d2b46e..ae84c49 100644
+--- a/android/app/src/main/java/dev/mdm/android/Theme.kt
++++ b/android/app/src/main/java/dev/mdm/android/Theme.kt
+@@ -7,7 +7,7 @@ import androidx.compose.material3.lightColorScheme
+ import androidx.compose.runtime.Composable
+ import androidx.compose.ui.graphics.Color
+ 
+-/** The blue, white and slate of the Free Download Manager phone screens this app is styled after. */
++/** Neutral dark surfaces with a blue accent: a phone download manager's look (own colours, no one's artwork). */
+ object MdmColors {
+     val Blue = Color(0xFF1E88E5)
+     val BlueDark = Color(0xFF1565C0)
+@@ -39,9 +39,9 @@ private val Dark = darkColorScheme(
+     primaryContainer = Color(0xFF123B63),
+     onPrimaryContainer = Color(0xFFD6E8FB),
+     secondary = Color(0xFF4DA3F0),
+-    background = MdmColors.SlateDeep,
+-    surface = MdmColors.SlateDeep,
+-    surfaceVariant = MdmColors.Slate,
++    background = Color(0xFF121417),
++    surface = Color(0xFF121417),
++    surfaceVariant = Color(0xFF1C2026),
+     onSurface = Color(0xFFE6EBEF),
+     onSurfaceVariant = Color(0xFF9FB0BC),
+     outlineVariant = Color(0xFF37474F),
+diff --git a/android/app/src/main/java/dev/mdm/android/VideoDetector.kt b/android/app/src/main/java/dev/mdm/android/VideoDetector.kt
+index 3987197..f1c42c2 100644
+--- a/android/app/src/main/java/dev/mdm/android/VideoDetector.kt
++++ b/android/app/src/main/java/dev/mdm/android/VideoDetector.kt
+@@ -6,7 +6,7 @@ import android.net.Uri
+  * Decides whether a link is something worth offering to download as a video:
+  *  - [directMedia]: the link IS a media file (.mp4, .webm, .mp3 ...): the engine downloads it as it is.
+  *  - [videoPage]: the link is a page of a site yt-dlp understands (a YouTube watch page ...): handed
+- *    to [VideoResolver], which finds the stream.
++ *    to [VideoEngine], which downloads it (and falls back to the Rust page analyzer).
+  * Used by the in-app browser, by [Overlay] through [LinkWatcherService], and by the share sheet.
+  */
+ object VideoDetector {
+@@ -45,6 +45,23 @@ object VideoDetector {
+ 
+     fun videoPage(url: String): Boolean = pages.any { it.containsMatchIn(url) }
+ 
++    private val fileExt = setOf(
++        "zip", "rar", "7z", "tar", "gz", "xz", "bz2", "iso", "apk", "xapk", "pdf", "doc", "docx",
++        "xls", "xlsx", "ppt", "pptx", "txt", "epub", "jpg", "jpeg", "png", "gif", "webp", "exe", "msi", "dmg",
++    )
++
++    /**
++     * A link that is probably a web page (no file extension, or .html/.php ...): worth ANALYZING
++     * for the media it holds, instead of downloading the page itself.
++     */
++    fun looksLikePage(url: String): Boolean {
++        if (!url.startsWith("http", ignoreCase = true)) return false
++        if (directMedia(url)) return false
++        val path = runCatching { Uri.parse(url).path }.getOrNull()?.lowercase().orEmpty()
++        val ext = path.substringAfterLast('.', "").takeIf { '/' !in it }.orEmpty()
++        return ext.isEmpty() || ext in setOf("html", "htm", "php", "asp", "aspx", "jsp", "shtml") || (ext !in fileExt && ext.length > 5)
++    }
++
+     fun classify(url: String, mime: String? = null): Match? = when {
+         !url.startsWith("http", ignoreCase = true) -> null
+         videoPage(url) -> Match.PAGE
+diff --git a/android/app/src/main/java/dev/mdm/android/VideoEngine.kt b/android/app/src/main/java/dev/mdm/android/VideoEngine.kt
+new file mode 100644
+index 0000000..3b8e9b9
+--- /dev/null
++++ b/android/app/src/main/java/dev/mdm/android/VideoEngine.kt
+@@ -0,0 +1,258 @@
++package dev.mdm.android
++
++import android.content.Context
++import com.yausername.youtubedl_android.YoutubeDL
++import com.yausername.youtubedl_android.YoutubeDLRequest
++import java.io.File
++import java.util.Locale
++import java.util.concurrent.CountDownLatch
++import java.util.concurrent.TimeUnit
++import java.util.concurrent.atomic.AtomicBoolean
++import org.json.JSONObject
++
++/**
++ * Video pages. WHY THIS REPLACED THE OLD "yt-dlp finds the address, our engine downloads it":
++ * the old way kept failing ("yt-dlp failed", format errors) because
++ *  - it asked for ONE file with picture and sound (`best[ext=mp4]`), which many sites (and every
++ *    YouTube quality above 360p/720p) do not offer: "Requested format is not available";
++ *  - a stream address is only good with the exact headers yt-dlp used, and expires;
++ *  - when yt-dlp could not read a site at all there was no second try.
++ * Now yt-dlp downloads AND merges (ffmpeg, inside the APK) by itself, and a failure walks a
++ * ladder instead of stopping:
++ *   1. yt-dlp, best video + best audio, merged to mp4 (or MP3 for "audio only");
++ *   2. update yt-dlp (it goes stale within weeks) and try again;
++ *   3. other YouTube "clients" (some need no JavaScript, which this app's yt-dlp does not have);
++ *   4. one single file, no merging (`-f b`);
++ *   5. the Rust page analyzer ([Native] "analyze"): reads the page's own source for a file,
++ *      an HLS/DASH stream or an embedded player, whatever the site, and downloads that.
++ * Every failure is explained in words ([explain]); yt-dlp's raw text is kept under "Details".
++ */
++object VideoEngine {
++    sealed class Outcome {
++        /** yt-dlp wrote a finished file. */
++        data class File(val path: java.io.File) : Outcome()
++
++        /** A plain file the analyzer found: the HTTP engine downloads it with [headers]. */
++        data class Direct(val url: String, val headers: Map<String, String>, val title: String?) : Outcome()
++
++        data class Failed(val short: String, val detail: String) : Outcome()
++
++        /** The person paused or removed it. */
++        object Stopped : Outcome()
++    }
++
++    /** What the screen shows while it runs; [pct] 0..100, sizes in bytes (0: unknown). */
++    class Progress(val pct: Float, val total: Long, val speed: Long, val title: String?)
++
++    @Volatile
++    private var ready = false
++    private val updateStarted = AtomicBoolean(false)
++    private val updateDone = CountDownLatch(1)
++    private val stopped = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
++
++    private fun ensureReady(context: Context) {
++        if (ready) return
++        synchronized(this) {
++            if (ready) return
++            YoutubeDL.getInstance().init(context.applicationContext)
++            ready = true
++        }
++        val app = context.applicationContext
++        Thread({ updateNow(app) }, "mdm-ytdlp-update").apply { isDaemon = true }.start()
++    }
++
++    private fun updateNow(app: Context) {
++        if (!updateStarted.compareAndSet(false, true)) return
++        try {
++            val yt = YoutubeDL.getInstance()
++            runCatching { yt.updateYoutubeDL(app, YoutubeDL.UpdateChannel.NIGHTLY) }
++                .recoverCatching { yt.updateYoutubeDL(app, YoutubeDL.UpdateChannel.STABLE) }
++        } finally {
++            updateDone.countDown()
++        }
++    }
++
++    private fun waitForUpdate(app: Context) {
++        updateNow(app)
++        updateDone.await(120, TimeUnit.SECONDS)
++    }
++
++    /** Stops a running download (pause or remove); yt-dlp continues from its .part file next time. */
++    fun stop(key: String) {
++        stopped += key
++        runCatching { YoutubeDL.getInstance().destroyProcessById(key) }
++    }
++
++    /** Blocks (never on the main thread). Returns what [Downloads] should do next. */
++    fun run(
++        context: Context,
++        key: String,
++        page: String,
++        dir: File,
++        audio: Boolean,
++        referer: String?,
++        onProgress: (Progress) -> Unit,
++    ): Outcome {
++        val app = context.applicationContext
++        stopped -= key
++        runCatching { ensureReady(app) }.onFailure {
++            return Outcome.Failed(explain(it.message.orEmpty()), "yt-dlp could not start: ${it.message}")
++        }
++        dir.mkdirs()
++        val log = StringBuilder()
++        fun attempt(label: String, extra: List<String>, url: String = page, headers: Map<String, String> = emptyMap()): File? {
++            if (key in stopped) return null
++            return try {
++                ytdlp(key, url, dir, audio, extra, headers.ifEmpty { referer?.let { mapOf("Referer" to it) } ?: emptyMap() }, onProgress)
++            } catch (e: Exception) {
++                if (key in stopped) return null
++                log.append("[$label] ").append(e.message.orEmpty().takeLast(1500)).append("\n\n")
++                null
++            }
++        }
++
++        // 1 and 2: the plain try, then again after an update.
++        attempt("default", emptyList())?.let { return Outcome.File(it) }
++        if (key in stopped) return Outcome.Stopped
++        waitForUpdate(app)
++        attempt("after update", emptyList())?.let { return Outcome.File(it) }
++        if (key in stopped) return Outcome.Stopped
++        // 3: other players (no JavaScript needed) for YouTube.
++        attempt("other clients", listOf("--extractor-args", "youtube:player_client=tv,android_vr,web_safari"))?.let { return Outcome.File(it) }
++        if (key in stopped) return Outcome.Stopped
++        // 4: one file only, no merging.
++        attempt("single file", listOf("-f", "b/best"), headers = emptyMap())?.let { return Outcome.File(it) }
++        if (key in stopped) return Outcome.Stopped
++
++        // 5: the page analyzer: for sites yt-dlp has no extractor for (or lost).
++        val found = Native.invoke("analyze", JSONObject().put("url", page).apply {
++            referer?.let { put("headers", JSONObject().put("Referer", it)) }
++        })
++        val err = found.optString("error").ifEmpty { null }
++        if (err != null) log.append("[analyzer] ").append(err).append("\n")
++        val cands = found.optJSONArray("candidates")
++        val hdr = found.optJSONObject("headers")
++        val headers = LinkedHashMap<String, String>().apply { hdr?.keys()?.forEach { put(it, hdr.optString(it)) } }
++        val title = found.optString("title").ifEmpty { null }
++        if (cands != null) {
++            for (i in 0 until cands.length()) {
++                if (key in stopped) return Outcome.Stopped
++                val c = cands.getJSONObject(i)
++                val url = c.getString("url")
++                when (c.optString("kind")) {
++                    "file" -> return Outcome.Direct(url, headers, title)
++                    "hls", "dash", "page" ->
++                        attempt("analyzer ${c.optString("kind")}", emptyList(), url = url, headers = headers)?.let { return Outcome.File(it) }
++                }
++            }
++            if (cands.length() == 0) log.append("[analyzer] no media found in the page's source\n")
++        }
++        if (key in stopped) return Outcome.Stopped
++        val detail = log.toString().trim().ifEmpty { "no details" }
++        return Outcome.Failed(explain(detail), detail)
++    }
++
++    private val PROGRESS = Regex("""(\d+(?:\.\d+)?)%\s+of\s+~?\s*([\d.]+)\s*(B|KiB|MiB|GiB)(?:\s+at\s+([\d.]+)\s*(B|KiB|MiB|GiB)/s)?""")
++
++    private fun unit(v: Double, u: String): Long = (v * when (u) {
++        "KiB" -> 1024.0
++        "MiB" -> 1024.0 * 1024
++        "GiB" -> 1024.0 * 1024 * 1024
++        else -> 1.0
++    }).toLong()
++
++    private fun ytdlp(
++        key: String,
++        url: String,
++        dir: File,
++        audio: Boolean,
++        extra: List<String>,
++        headers: Map<String, String>,
++        onProgress: (Progress) -> Unit,
++    ): File {
++        val request = YoutubeDLRequest(url).apply {
++            addOption("--no-playlist")
++            addOption("--no-mtime")
++            addOption("--newline")
++            addOption("--retries", "5")
++            addOption("--fragment-retries", "10")
++            addOption("--concurrent-fragments", "4")
++            addOption("--socket-timeout", "30")
++            addOption("-o", dir.absolutePath + "/%(title).120B [%(id)s].%(ext)s")
++            // The finished file's path, printed once everything (merging, conversion) is done.
++            addOption("--print", "after_move:filepath")
++            addOption("--no-simulate")
++            if (audio) {
++                addOption("-x")
++                addOption("--audio-format", "mp3")
++                addOption("--audio-quality", "0")
++            } else {
++                addOption("-f", "bv*[height<=?1080]+ba/b[height<=?1080]/b")
++                addOption("--merge-output-format", "mp4")
++            }
++            headers.forEach { (k, v) -> addOption("--add-header", "$k:$v") }
++            var i = 0
++            while (i < extra.size) {
++                // Pairs ("-f", "b") replace the default of the same flag; single flags are added.
++                val flag = extra[i]
++                if (i + 1 < extra.size && !extra[i + 1].startsWith("-")) {
++                    addOption(flag, extra[i + 1])
++                    i += 2
++                } else {
++                    addOption(flag)
++                    i += 1
++                }
++            }
++        }
++        var title: String? = null
++        val response = YoutubeDL.getInstance().execute(request, key) { _, _, line ->
++            PROGRESS.find(line)?.let { m ->
++                val total = unit(m.groupValues[2].toDouble(), m.groupValues[3])
++                val speed = if (m.groupValues[4].isNotEmpty()) unit(m.groupValues[4].toDouble(), m.groupValues[5]) else 0L
++                onProgress(Progress(m.groupValues[1].toFloat(), total, speed, title))
++            }
++            if (line.contains("Destination:")) title = line.substringAfter("Destination:").trim().substringAfterLast('/')
++        }
++        val out = response.out.lines().map { it.trim() }.filter { it.startsWith("/") }
++        val path = out.asReversed().map(::File).firstOrNull { it.isFile }
++            ?: error("yt-dlp finished but no file was written")
++        return path
++    }
++
++    // ---- explaining failures ----
++
++    private fun ar() = Locale.getDefault().language == "ar"
++
++    /** A short plain sentence for yt-dlp's technical text (the raw text stays under "Details"). */
++    fun explain(raw: String): String {
++        val r = raw.lowercase()
++        val (en, arabic) = when {
++            "sign in to confirm" in r || "not a bot" in r || "login required" in r || "log in" in r && "cookies" in r ->
++                "The site wants you signed in or says you are a bot. Open the page in the built-in browser, sign in, then try again." to
++                    "الموقع يطلب تسجيل الدخول أو يعتبرك روبوت. افتح الصفحة في المتصفح الداخلي وسجّل دخولك ثم أعد المحاولة."
++            "requested format is not available" in r || "n challenge" in r || "javascript runtime" in r || "nsig" in r ->
++                "This site (usually YouTube) changed how it serves video, and no way to read it worked this time. Try again later, or open it in the built-in browser." to
++                    "الموقع (غالباً يوتيوب) غيّر طريقة عرض الفيديو ولم تنجح أي طريقة للقراءة هذه المرة. جرّب لاحقاً أو افتحه في المتصفح الداخلي."
++            "http error 403" in r || "403" in r && "forbidden" in r ->
++                "The site refused the download (403). Open the page in the built-in browser first, then try again." to
++                    "الموقع رفض التحميل (403). افتح الصفحة في المتصفح الداخلي أولاً ثم أعد المحاولة."
++            "http error 404" in r || "not found" in r && "404" in r ->
++                "The video is gone or the link is wrong (404)." to "الفيديو محذوف أو الرابط غير صحيح (404)."
++            "private video" in r || "members-only" in r || "premium" in r ->
++                "This video is private or for members only." to "هذا الفيديو خاص أو للأعضاء فقط."
++            "drm" in r || "protected" in r ->
++                "This video is protected (DRM) and cannot be downloaded." to "هذا الفيديو محمي (DRM) ولا يمكن تحميله."
++            "unsupported url" in r || "no media found" in r || "no video formats" in r ->
++                "No video was found on this page. If it plays in the built-in browser, the app will offer it there." to
++                    "ما لقيت فيديو بهذه الصفحة. إذا كان بيشتغل بالمتصفح الداخلي رح يعرضه التطبيق هناك."
++            "unable to download" in r || "timed out" in r || "name or service not known" in r || "network is unreachable" in r || "unable to resolve" in r ->
++                "No internet connection, or the site did not answer." to "ما في اتصال بالإنترنت أو الموقع ما ردّ."
++            "ffmpeg" in r ->
++                "Joining picture and sound failed (ffmpeg). Try again; if it repeats, send the Details to the developer." to
++                    "فشل دمج الصورة والصوت (ffmpeg). أعد المحاولة، وإذا تكرر ابعت التفاصيل للمطوّر."
++            else ->
++                "The download failed. Tap Details to see why, and Retry." to "فشل التحميل. اضغط «التفاصيل» لمعرفة السبب ثم أعد المحاولة."
++        }
++        return if (ar()) arabic else en
++    }
++}
+diff --git a/android/app/src/main/java/dev/mdm/android/VideoResolver.kt b/android/app/src/main/java/dev/mdm/android/VideoResolver.kt
+deleted file mode 100644
+index da81532..0000000
+--- a/android/app/src/main/java/dev/mdm/android/VideoResolver.kt
++++ /dev/null
+@@ -1,120 +0,0 @@
+-package dev.mdm.android
+-
+-import android.content.Context
+-import com.yausername.youtubedl_android.YoutubeDL
+-import com.yausername.youtubedl_android.YoutubeDLRequest
+-import org.json.JSONObject
+-
+-/**
+- * Video pages: yt-dlp (inside the app, through youtubedl-android) finds the stream's direct
+- * address, and MDM's engine downloads it with many connections: the speed-up stays.
+- *
+- * On the desktop MDM runs yt-dlp as a separate program (crates/tools); a phone can't, so the
+- * library brings Python, yt-dlp and ffmpeg inside the APK.
+- *
+- * Why this asks yt-dlp for its JSON itself (`--dump-single-json`) instead of using the library's
+- * VideoInfo: the stream's address is only good with the headers yt-dlp used to find it (User-Agent,
+- * Referer, ...). Sites such as YouTube answer 403 to the bare address. The JSON carries them
+- * (`http_headers`) and they go to the engine along with the address.
+- *
+- * yt-dlp goes stale within weeks, so it updates itself in the background at the first use, and a
+- * failure to resolve is retried ONCE after an update finished.
+- *
+- * Limit: the address is ONE file with sound and picture together (YouTube serves those up to
+- * 720p; the higher qualities are separate picture and sound streams that need ffmpeg to join).
+- */
+-object VideoResolver {
+-    data class Found(
+-        val url: String,
+-        val title: String,
+-        val ext: String,
+-        /** What yt-dlp sent to the site: the engine sends the same with the stream's address. */
+-        val headers: Map<String, String>,
+-    )
+-
+-    @Volatile
+-    private var ready = false
+-    private val updateStarted = java.util.concurrent.atomic.AtomicBoolean(false)
+-    private val updateDone = java.util.concurrent.CountDownLatch(1)
+-
+-    private fun ensureReady(context: Context) {
+-        if (ready) return
+-        synchronized(this) {
+-            if (ready) return
+-            YoutubeDL.getInstance().init(context.applicationContext)
+-            ready = true
+-        }
+-        // Don't make the first video wait for the update: it runs on its own thread.
+-        val app = context.applicationContext
+-        Thread({ updateNow(app) }, "mdm-ytdlp-update").apply { isDaemon = true }.start()
+-    }
+-
+-    /** Updates yt-dlp once per process (the first caller does the work, the others return at once). */
+-    private fun updateNow(app: Context) {
+-        if (!updateStarted.compareAndSet(false, true)) return
+-        try {
+-            // Nightly first: YouTube changes faster than stable releases; stable if that fails.
+-            val yt = YoutubeDL.getInstance()
+-            runCatching { yt.updateYoutubeDL(app, YoutubeDL.UpdateChannel.NIGHTLY) }
+-                .recoverCatching { yt.updateYoutubeDL(app, YoutubeDL.UpdateChannel.STABLE) }
+-        } finally {
+-            updateDone.countDown()
+-        }
+-    }
+-
+-    /** Returns when the one update of this process has finished (at most two minutes). */
+-    private fun waitForUpdate(app: Context) {
+-        updateNow(app) // runs it here when nothing started it yet
+-        updateDone.await(120, java.util.concurrent.TimeUnit.SECONDS)
+-    }
+-
+-    /** Blocks (the first call unpacks yt-dlp): never on the main thread. Throws with yt-dlp's own message. */
+-    fun resolve(context: Context, page: String): Found {
+-        val app = context.applicationContext
+-        ensureReady(app)
+-        return try {
+-            fetch(page)
+-        } catch (first: Exception) {
+-            // Most "yt-dlp can't do this site" failures are an old yt-dlp: update, then try once more.
+-            waitForUpdate(app)
+-            fetch(page)
+-        }
+-    }
+-
+-    private fun fetch(page: String): Found {
+-        val request = YoutubeDLRequest(page).apply {
+-            addOption("--dump-single-json")
+-            addOption("--no-playlist")
+-            addOption("--no-warnings")
+-            addOption("-f", "best[ext=mp4]/best")
+-        }
+-        // (request, null, null): the call the library's own getInfo makes; `execute(request)`
+-        // alone fits two of its overloads.
+-        val out = YoutubeDL.getInstance().execute(request, null, null).out
+-        // yt-dlp can print other lines before the JSON; the JSON is the last object.
+-        val start = out.indexOf('{')
+-        if (start < 0) error("yt-dlp gave no answer for this page")
+-        val info = JSONObject(out.substring(start))
+-        val url = info.optString("url").ifEmpty { null }
+-            ?: error("yt-dlp found no single stream for this page")
+-        return Found(
+-            url = url,
+-            title = info.optString("title").ifEmpty { page },
+-            ext = info.optString("ext").ifEmpty { "mp4" },
+-            headers = headersOf(info.optJSONObject("http_headers")),
+-        )
+-    }
+-
+-    /** yt-dlp's request headers minus the ones the engine decides itself. */
+-    private fun headersOf(h: JSONObject?): Map<String, String> {
+-        if (h == null) return emptyMap()
+-        val skip = setOf("accept-encoding", "host", "content-length", "range")
+-        val map = LinkedHashMap<String, String>()
+-        for (k in h.keys()) {
+-            if (k.lowercase() in skip) continue
+-            val v = h.optString(k)
+-            if (v.isNotEmpty()) map[k] = v
+-        }
+-        return map
+-    }
+-}
+diff --git a/android/app/src/main/res/values-ar/strings.xml b/android/app/src/main/res/values-ar/strings.xml
+index e482f5b..a538ebb 100644
+--- a/android/app/src/main/res/values-ar/strings.xml
++++ b/android/app/src/main/res/values-ar/strings.xml
+@@ -102,4 +102,36 @@
+     <!-- Accessibility service -->
+     <string name="watcher_label">اكتشاف روابط Mister Download Manager</string>
+     <string name="watcher_description">يقرأ شريط عنوان المتصفحات ليعرض تنزيل الفيديوهات. لا يقرأ محتوى الصفحات.</string>
++
++    <!-- ADM-style drawer, categories -->
++    <string name="drawer_downloads">كل التنزيلات</string>
++    <string name="cat_video">فيديوهات</string>
++    <string name="cat_audio">صوتيات</string>
++    <string name="cat_documents">مستندات</string>
++    <string name="cat_apps">تطبيقات</string>
++    <string name="cat_archives">ملفات مضغوطة</string>
++    <string name="cat_images">صور</string>
++    <string name="cat_other">أخرى</string>
++    <string name="tab_downloading">قيد التحميل</string>
++    <string name="paste_link">لصق رابط</string>
++
++    <!-- Add dialog -->
++    <string name="add_analyze">هذه صفحة ويب: ابحث عن الفيديو فيها</string>
++    <string name="add_audio">صوت فقط (MP3)</string>
++
++    <!-- Failures -->
++    <string name="retry">إعادة المحاولة</string>
++    <string name="details">التفاصيل</string>
++    <string name="details_copy">نسخ التفاصيل</string>
++    <string name="details_copied">تم نسخ التفاصيل</string>
++
++    <!-- Floating button and deep detection -->
++    <string name="settings_bubble">الزر العائم</string>
++    <string name="settings_bubble_desc">زر دائري فوق كل التطبيقات. انسخ أي رابط، اضغط الزر، والتطبيق يحلّل الرابط ويحمّل.</string>
++    <string name="settings_deep">تحليل أي صفحة (كشف عميق)</string>
++    <string name="settings_deep_desc">مع تشغيل كشف روابط الفيديو، التطبيق يقرأ كمان الصفحات اللي بتزورها ليلاقي فيديو بأي موقع. بيقرأ العنوان ومصدر الصفحة فقط، ولا يخرج من جوالك شي غير طلب الصفحة نفسه.</string>
++    <string name="bubble_channel">الزر العائم</string>
++    <string name="bubble_notification">زر التحميل العائم شغّال</string>
++    <string name="clip_no_link">ما في رابط في الحافظة. انسخ رابط أولاً.</string>
++    <string name="clipboard_link">رابط في الحافظة</string>
+ </resources>
+diff --git a/android/app/src/main/res/values/strings.xml b/android/app/src/main/res/values/strings.xml
+index 47cf2ee..e2eaa91 100644
+--- a/android/app/src/main/res/values/strings.xml
++++ b/android/app/src/main/res/values/strings.xml
+@@ -102,4 +102,36 @@
+     <!-- Accessibility service -->
+     <string name="watcher_label">Mister Download Manager link detection</string>
+     <string name="watcher_description">Reads the address bar of browsers to offer downloading videos. It does not read page content.</string>
++
++    <!-- ADM-style drawer, categories -->
++    <string name="drawer_downloads">All downloads</string>
++    <string name="cat_video">Videos</string>
++    <string name="cat_audio">Music</string>
++    <string name="cat_documents">Documents</string>
++    <string name="cat_apps">Apps</string>
++    <string name="cat_archives">Archives</string>
++    <string name="cat_images">Images</string>
++    <string name="cat_other">Other</string>
++    <string name="tab_downloading">Downloading</string>
++    <string name="paste_link">Paste link</string>
++
++    <!-- Add dialog -->
++    <string name="add_analyze">This is a web page: find the video in it</string>
++    <string name="add_audio">Sound only (MP3)</string>
++
++    <!-- Failures -->
++    <string name="retry">Retry</string>
++    <string name="details">Details</string>
++    <string name="details_copy">Copy details</string>
++    <string name="details_copied">Details copied</string>
++
++    <!-- Floating button and deep detection -->
++    <string name="settings_bubble">Floating button</string>
++    <string name="settings_bubble_desc">A round button above every app. Copy a link anywhere, tap it, and the app analyzes the link and downloads.</string>
++    <string name="settings_deep">Analyze any page (deep detection)</string>
++    <string name="settings_deep_desc">With the video-link detection turned on, the app also reads the pages you visit to find video on any site. It reads only the address and the page source, and nothing leaves your phone but the page request itself.</string>
++    <string name="bubble_channel">Floating button</string>
++    <string name="bubble_notification">Floating download button is on</string>
++    <string name="clip_no_link">No link in the clipboard. Copy a link first.</string>
++    <string name="clipboard_link">Link in clipboard</string>
+ </resources>
+diff --git a/crates/android/Cargo.toml b/crates/android/Cargo.toml
+index 3e16e2d..dd5dd2b 100644
+--- a/crates/android/Cargo.toml
++++ b/crates/android/Cargo.toml
+@@ -22,6 +22,8 @@ http = "1"
+ serde_json = "1"
+ url = "2"
+ base64 = "0.22"
++# The page analyzer (src/analyze.rs): finds the media a web page holds, whatever the site.
++regex = "1"
+ 
+ # A workspace of its own: the desktop workspace excludes this folder (Cargo.toml there), so the
+ # desktop build and its Cargo.lock never see `jni`.
+diff --git a/crates/android/src/analyze.rs b/crates/android/src/analyze.rs
+new file mode 100644
+index 0000000..8de7f07
+--- /dev/null
++++ b/crates/android/src/analyze.rs
+@@ -0,0 +1,403 @@
++//! The page analyzer: given ANY address, finds the media it holds, with no help from yt-dlp.
++//!
++//! Many sites yt-dlp has no extractor for (small video sites, a company's own player, a blog with
++//! an embedded clip) still put the file's address in the page: an `og:video` tag, a `<video>` or
++//! `<source>` element, JSON-LD, or a script that builds the player. This reads the page the way a
++//! person would "view source", follows a few embedded players (`<iframe>`), and returns the
++//! candidates best first. The app then downloads a direct file with the engine and a stream
++//! (HLS `.m3u8`, DASH `.mpd`) or a site yt-dlp knows with yt-dlp/ffmpeg.
++//!
++//! `analyze {url, headers?}` → `{ final_url, title, direct, candidates: [{url, kind, audio,
++//! quality, source}], headers }` where `kind` is `file`, `hls`, `dash` or `page` (an embedded
++//! player on a site yt-dlp reads). Only reads: nothing is written, nothing is executed.
++
++use std::collections::HashSet;
++use std::sync::LazyLock;
++use std::time::Duration;
++
++use http::{HeaderMap, HeaderName, HeaderValue};
++use mdm_engine::Options;
++use regex::Regex;
++use serde_json::{Value, json};
++use url::Url;
++
++use crate::{Reply, rt, text};
++
++/// The most of a page that is read (media addresses sit in the first megabytes).
++const MAX_PAGE: usize = 3 * 1024 * 1024;
++/// Embedded players followed, one level deep.
++const MAX_FRAMES: usize = 3;
++const MAX_CANDIDATES: usize = 20;
++
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub struct Candidate {
++    pub url: String,
++    pub kind: &'static str,
++    pub audio: bool,
++    pub quality: Option<u32>,
++    pub source: &'static str,
++}
++
++static MEDIA_URL: LazyLock<Regex> = LazyLock::new(|| {
++    Regex::new(
++        r#"(?i)https?://[^\s"'<>\\)\]]+?\.(?:mp4|m4v|webm|mkv|mov|m3u8|mpd|mp3|m4a|aac|ogg|opus|flac|wav)(?:\?[^\s"'<>\\)\]]*)?"#,
++    )
++    .expect("regex")
++});
++static QUALITY: LazyLock<Regex> =
++    LazyLock::new(|| Regex::new(r"(?i)(?:[/_\-.=])(\d{3,4})p?(?:[/_\-.?&]|$)").expect("regex"));
++static TAG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?is)<(video|source|audio|iframe|meta|link)\b[^>]*>").expect("regex"));
++static ATTR: LazyLock<Regex> = LazyLock::new(|| {
++    Regex::new(r#"(?is)([a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))"#).expect("regex")
++});
++static TITLE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?is)<title[^>]*>(.*?)</title>").expect("regex"));
++static JSON_LD_URL: LazyLock<Regex> = LazyLock::new(|| {
++    Regex::new(r#"(?i)"(?:contentUrl|embedUrl|contentURL)"\s*:\s*"([^"]+)""#).expect("regex")
++});
++
++/// Sites whose players yt-dlp reads: an `<iframe>` there is offered as a page.
++const KNOWN_PLAYERS: &[&str] = &[
++    "youtube.com", "youtube-nocookie.com", "youtu.be", "vimeo.com", "dailymotion.com",
++    "streamable.com", "twitch.tv", "facebook.com", "rumble.com", "bilibili.com", "ok.ru",
++    "vk.com", "tiktok.com", "instagram.com", "soundcloud.com",
++];
++/// Iframes that are never a video (ads, widgets, sign-in).
++const SKIP_FRAMES: &[&str] = &[
++    "doubleclick", "googlesyndication", "googletagmanager", "adservice", "facebook.com/plugins",
++    "twitter.com/widgets", "platform.twitter", "recaptcha", "disqus", "addthis",
++];
++
++fn unescape(s: &str) -> String {
++    s.replace("\\/", "/")
++        .replace("\\u0026", "&")
++        .replace("\\u002F", "/")
++        .replace("\\u002f", "/")
++        .replace("\\x26", "&")
++        .replace("\\x2F", "/")
++        .replace("&amp;", "&")
++}
++
++fn host_matches(url: &Url, list: &[&str]) -> bool {
++    url.host_str().is_some_and(|h| {
++        let h = h.to_ascii_lowercase();
++        list.iter().any(|d| h == *d || h.ends_with(&format!(".{d}")))
++    })
++}
++
++fn classify(url: &str) -> Option<(&'static str, bool)> {
++    let path = url.split(['?', '#']).next().unwrap_or(url).to_ascii_lowercase();
++    let ext = path.rsplit('.').next()?;
++    Some(match ext {
++        "m3u8" => ("hls", false),
++        "mpd" => ("dash", false),
++        "mp4" | "m4v" | "webm" | "mkv" | "mov" => ("file", false),
++        "mp3" | "m4a" | "aac" | "ogg" | "opus" | "flac" | "wav" => ("file", true),
++        _ => return None,
++    })
++}
++
++fn junk(url: &str) -> bool {
++    let l = url.to_ascii_lowercase();
++    ["thumb", "poster", "preview", "sprite", "/ads/", "adserver", "tracking", "pixel", "sample.mp4"]
++        .iter()
++        .any(|w| l.contains(w))
++}
++
++fn attrs(tag: &str) -> Vec<(String, String)> {
++    ATTR.captures_iter(tag)
++        .map(|c| {
++            let v = c.get(2).or(c.get(3)).or(c.get(4)).map_or("", |m| m.as_str());
++            (c[1].to_ascii_lowercase(), v.to_owned())
++        })
++        .collect()
++}
++
++fn resolve(base: &Url, raw: &str) -> Option<Url> {
++    let raw = unescape(raw.trim());
++    if raw.is_empty() || raw.starts_with("data:") || raw.starts_with("blob:") || raw.starts_with("javascript:") {
++        return None;
++    }
++    let u = base.join(&raw).ok()?;
++    matches!(u.scheme(), "http" | "https").then_some(u)
++}
++
++fn push(found: &mut Vec<Candidate>, seen: &mut HashSet<String>, url: Url, source: &'static str, hint_audio: bool) {
++    let s = url.to_string();
++    if junk(&s) || !seen.insert(s.clone()) {
++        return;
++    }
++    if let Some((kind, audio)) = classify(&s) {
++        let quality = QUALITY.captures(&s).and_then(|c| c[1].parse().ok()).filter(|q| (144..=4320).contains(q));
++        found.push(Candidate { url: s, kind, audio: audio || hint_audio, quality, source });
++    }
++}
++
++/// What a page's source holds, best first, plus its iframes' addresses and its title.
++pub fn extract(base: &Url, html: &str) -> (Vec<Candidate>, Vec<Url>, Option<String>) {
++    let mut found: Vec<Candidate> = Vec::new();
++    let mut seen: HashSet<String> = HashSet::new();
++    let mut frames: Vec<Url> = Vec::new();
++    for m in TAG.find_iter(html) {
++        let tag = m.as_str();
++        let name = tag[1..].split(|c: char| !c.is_ascii_alphabetic()).next().unwrap_or("").to_ascii_lowercase();
++        let a = attrs(tag);
++        let get = |k: &str| a.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str());
++        match name.as_str() {
++            "video" | "source" | "audio" => {
++                let src = get("src").or(get("data-src")).or(get("data-url"));
++                if let Some(u) = src.and_then(|s| resolve(base, s)) {
++                    // `<source>` without a media extension still has a type attribute.
++                    let source = if name == "source" { "source-tag" } else { "video-tag" };
++                    if classify(u.as_str()).is_some() {
++                        push(&mut found, &mut seen, u, source, name == "audio");
++                    } else if get("type").is_some_and(|t| t.starts_with("video/") || t.starts_with("audio/")) {
++                        let s = u.to_string();
++                        if seen.insert(s.clone()) {
++                            found.push(Candidate { url: s, kind: "file", audio: get("type").is_some_and(|t| t.starts_with("audio/")), quality: None, source });
++                        }
++                    }
++                }
++            }
++            "meta" => {
++                let key = get("property").or(get("name")).unwrap_or("").to_ascii_lowercase();
++                if matches!(
++                    key.as_str(),
++                    "og:video" | "og:video:url" | "og:video:secure_url" | "og:audio" | "og:audio:url"
++                        | "twitter:player:stream" | "twitter:player:stream:url"
++                ) && let Some(u) = get("content").and_then(|c| resolve(base, c))
++                {
++                    if classify(u.as_str()).is_some() {
++                        push(&mut found, &mut seen, u, "og-meta", key.contains("audio"));
++                    }
++                }
++            }
++            "iframe" => {
++                if let Some(u) = get("src").or(get("data-src")).and_then(|s| resolve(base, s)) {
++                    let l = u.as_str().to_ascii_lowercase();
++                    if !SKIP_FRAMES.iter().any(|w| l.contains(w)) && !frames.contains(&u) {
++                        frames.push(u);
++                    }
++                }
++            }
++            _ => {}
++        }
++    }
++
++    // JSON-LD / player configs: "contentUrl": "...".
++    for c in JSON_LD_URL.captures_iter(html) {
++        if let Some(u) = resolve(base, &c[1]) {
++            push(&mut found, &mut seen, u, "json-ld", false);
++        }
++    }
++    // Anything that looks like a media address in the page or its scripts (also JSON-escaped).
++    let plain = unescape(html);
++    for m in MEDIA_URL.find_iter(&plain) {
++        if let Ok(u) = Url::parse(m.as_str().trim_end_matches([',', ';', '.'])) {
++            push(&mut found, &mut seen, u, "script", false);
++        }
++    }
++
++    // Best first: plain files, then HLS, then DASH; the stated source before the scraped one;
++    // higher quality first.
++    found.sort_by_key(|c| {
++        let k = match c.kind { "file" => 0, "hls" => 1, _ => 2 };
++        let s = u8::from(c.source == "script");
++        (k, s, std::cmp::Reverse(c.quality.unwrap_or(0)))
++    });
++    found.truncate(MAX_CANDIDATES);
++
++    // Frames of sites yt-dlp reads become "page" candidates.
++    let mut kept = Vec::new();
++    for f in frames {
++        if host_matches(&f, KNOWN_PLAYERS) {
++            let s = f.to_string();
++            if seen.insert(s.clone()) {
++                found.push(Candidate { url: s, kind: "page", audio: false, quality: None, source: "iframe" });
++            }
++        } else {
++            kept.push(f);
++        }
++    }
++    let title = TITLE.captures(html).map(|c| html_text(&c[1])).filter(|t| !t.is_empty());
++    (found, kept, title)
++}
++
++fn html_text(s: &str) -> String {
++    let t = s.replace("&amp;", "&").replace("&quot;", "\"").replace("&#39;", "'").replace("&lt;", "<").replace("&gt;", ">");
++    t.split_whitespace().collect::<Vec<_>>().join(" ")
++}
++
++fn header_map(args: &Value) -> HeaderMap {
++    let mut map = HeaderMap::new();
++    if let Some(obj) = args.get("headers").and_then(Value::as_object) {
++        for (k, v) in obj {
++            if let (Ok(n), Ok(val)) = (HeaderName::from_bytes(k.as_bytes()), HeaderValue::from_str(v.as_str().unwrap_or(""))) {
++                map.insert(n, val);
++            }
++        }
++    }
++    map
++}
++
++struct Page {
++    final_url: Url,
++    content_type: String,
++    body: String,
++}
++
++async fn fetch_page(url: &Url, headers: HeaderMap, referer: Option<&str>) -> Result<Page, String> {
++    let mut opts = Options::default();
++    if let Some(ua) = crate::user_agent() {
++        opts.user_agent = ua;
++        opts.automatic_agent = false;
++    }
++    let client = mdm_engine::http_client(&opts, url).map_err(|e| e.to_string())?;
++    let mut req = client
++        .get(url.as_str())
++        .headers(headers)
++        .header("User-Agent", opts.user_agent.as_str())
++        .header("Accept", "text/html,application/xhtml+xml,*/*;q=0.8")
++        .timeout(Duration::from_secs(20));
++    if let Some(r) = referer {
++        req = req.header("Referer", r);
++    }
++    let mut resp = req.send().await.map_err(|e| e.to_string())?;
++    let status = resp.status();
++    if !status.is_success() {
++        return Err(format!("the site answered {status}"));
++    }
++    let final_url = Url::parse(resp.url().as_str()).map_err(|e| e.to_string())?;
++    let content_type = resp
++        .headers()
++        .get("content-type")
++        .and_then(|v| v.to_str().ok())
++        .unwrap_or("")
++        .to_ascii_lowercase();
++    // A media file is never read: its type says enough.
++    if content_type.starts_with("video/") || content_type.starts_with("audio/") {
++        return Ok(Page { final_url, content_type, body: String::new() });
++    }
++    let mut bytes: Vec<u8> = Vec::new();
++    while let Some(chunk) = resp.chunk().await.map_err(|e| e.to_string())? {
++        bytes.extend_from_slice(&chunk);
++        if bytes.len() >= MAX_PAGE {
++            break;
++        }
++    }
++    Ok(Page { final_url, content_type, body: String::from_utf8_lossy(&bytes).into_owned() })
++}
++
++fn to_json(c: &Candidate) -> Value {
++    json!({ "url": c.url, "kind": c.kind, "audio": c.audio, "quality": c.quality, "source": c.source })
++}
++
++/// `analyze {url, headers?}`: see the module's text.
++pub fn analyze(args: &Value) -> Reply {
++    let raw = text(args, "url")?;
++    let url = Url::parse(raw.trim()).map_err(|e| format!("not a link: {e}"))?;
++    if !matches!(url.scheme(), "http" | "https") {
++        return Err("only http and https pages can be analyzed".to_owned());
++    }
++    let headers = header_map(args);
++    rt().block_on(async move {
++        let page = fetch_page(&url, headers.clone(), None).await?;
++        let ct = page.content_type.as_str();
++        let ref_headers = json!({ "Referer": page.final_url.as_str() });
++        // The address is itself a media file or a playlist.
++        let direct_kind = if ct.starts_with("video/") || ct.starts_with("audio/") {
++            Some(("file", ct.starts_with("audio/")))
++        } else if ct.contains("mpegurl") {
++            Some(("hls", false))
++        } else if ct.contains("dash+xml") {
++            Some(("dash", false))
++        } else {
++            None
++        };
++        if let Some((kind, audio)) = direct_kind {
++            let c = Candidate { url: page.final_url.to_string(), kind, audio, quality: None, source: "direct" };
++            return Ok(json!({ "final_url": c.url, "title": null, "direct": true, "candidates": [to_json(&c)], "headers": ref_headers }));
++        }
++        let (mut cands, frames, title) = extract(&page.final_url, &page.body);
++        // One level of embedded players that are not a known site: their pages hold the file.
++        for f in frames.into_iter().take(MAX_FRAMES) {
++            if let Ok(p) = fetch_page(&f, headers.clone(), Some(page.final_url.as_str())).await {
++                let (more, _, _) = extract(&p.final_url, &p.body);
++                for mut c in more {
++                    if c.kind != "page" && !cands.iter().any(|x| x.url == c.url) {
++                        c.source = "iframe";
++                        cands.push(c);
++                    }
++                }
++            }
++        }
++        cands.truncate(MAX_CANDIDATES);
++        Ok::<Value, String>(json!({
++            "final_url": page.final_url.as_str(),
++            "title": title,
++            "direct": false,
++            "candidates": cands.iter().map(to_json).collect::<Vec<_>>(),
++            "headers": ref_headers,
++        }))
++    })
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn base() -> Url {
++        Url::parse("https://example.com/watch/42").unwrap()
++    }
++
++    #[test]
++    fn finds_og_video_and_relative_source_tags() {
++        let html = r#"<html><head><title> My  clip </title>
++            <meta property="og:video" content="https://cdn.example.com/v/clip_720.mp4?t=1&amp;s=2">
++            </head><body><video poster="p.jpg"><source src="/media/low_360.mp4" type="video/mp4"></video></body>"#;
++        let (c, _, title) = extract(&base(), html);
++        assert_eq!(title.as_deref(), Some("My clip"));
++        assert_eq!(c.len(), 2);
++        assert_eq!(c[0].url, "https://cdn.example.com/v/clip_720.mp4?t=1&s=2");
++        assert_eq!(c[0].quality, Some(720));
++        assert_eq!(c[1].url, "https://example.com/media/low_360.mp4");
++    }
++
++    #[test]
++    fn finds_escaped_urls_in_scripts_and_hls() {
++        let html = r#"<script>var cfg={"hls":"https:\/\/s.example.net\/live\/master.m3u8?a=1&b=2","mp4":"https:\/\/s.example.net\/f\/video.mp4"};</script>"#;
++        let (c, _, _) = extract(&base(), html);
++        assert_eq!(c[0].kind, "file");
++        assert_eq!(c[0].url, "https://s.example.net/f/video.mp4");
++        assert_eq!(c[1].kind, "hls");
++        assert_eq!(c[1].url, "https://s.example.net/live/master.m3u8?a=1&b=2");
++    }
++
++    #[test]
++    fn iframes_known_sites_become_pages_others_are_followed() {
++        let html = r#"<iframe src="https://www.youtube.com/embed/abc123"></iframe>
++            <iframe src="//player.example.org/p/9"></iframe>
++            <iframe src="https://googleads.g.doubleclick.net/x"></iframe>"#;
++        let (c, frames, _) = extract(&base(), html);
++        assert_eq!(c.len(), 1);
++        assert_eq!(c[0].kind, "page");
++        assert_eq!(frames.len(), 1);
++        assert_eq!(frames[0].as_str(), "https://player.example.org/p/9");
++    }
++
++    #[test]
++    fn json_ld_audio_and_junk() {
++        let html = r#"<script type="application/ld+json">{"@type":"AudioObject","contentUrl":"https://a.example.com/pod/ep1.mp3"}</script>
++            <img src="https://a.example.com/thumb_preview.mp4">"#;
++        let (c, _, _) = extract(&base(), html);
++        assert_eq!(c.len(), 1);
++        assert!(c[0].audio);
++        assert_eq!(c[0].source, "json-ld");
++    }
++
++    #[test]
++    fn a_page_with_nothing_has_no_candidates_and_bad_input_is_an_error() {
++        let (c, f, t) = extract(&base(), "<html><body>hello</body></html>");
++        assert!(c.is_empty() && f.is_empty() && t.is_none());
++        assert!(analyze(&json!({"url": "ftp://x/y"})).is_err());
++    }
++}
+diff --git a/crates/android/src/lib.rs b/crates/android/src/lib.rs
+index 19516aa..4b91ee7 100644
+--- a/crates/android/src/lib.rs
++++ b/crates/android/src/lib.rs
+@@ -12,6 +12,7 @@
+ //! desktop workspace's `unsafe_code = "deny"` doesn't reach it (it has a workspace of its own).
+ #![allow(unsafe_code)]
+ 
++mod analyze;
+ mod http_dl;
+ 
+ use std::panic::{AssertUnwindSafe, catch_unwind};
+@@ -73,6 +74,7 @@ fn dispatch(method: &str, args: &Value) -> Reply {
+     match method {
+         "init" => init(args),
+         "probe" => http_dl::probe(args),
++        "analyze" => analyze::analyze(args),
+         "http_start" => http_dl::start(args),
+         "http_resume" => http_dl::resume(args),
+         "http_snapshot" => http_dl::snapshot(args),
+diff --git a/docs/android-handoff.md b/docs/android-handoff.md
+index 91e0a4c..fe00c57 100644
+--- a/docs/android-handoff.md
++++ b/docs/android-handoff.md
+@@ -21,42 +21,57 @@ torrents (those wait: the torrent client did not work yet). Required:
+ 
+ Any library or language may be added if it helps.
+ 
+-## State (2026-11-13)
+-
+-Done in the code, **none of it compiled or run on a phone**:
+-
+-- [x] Torrent removed from the Kotlin app
+-- [x] FDM-style UI: top bar with the speed-mode chip, tabs, search, rows, dark mode (`Screens.kt`, `Theme.kt`)
+-- [x] Queue, Fast / Moderate / Slow modes, Snail mode, settings (`Downloads.kt`, `Prefs.kt`)
+-- [x] Floating "video found" window (`Overlay.kt`), optional address-bar watcher
+-      (`LinkWatcherService.kt`), built-in browser with media sniffing (`BrowserScreen.kt`),
+-      the on/off switch in Settings
+-- [x] Permissions screen: notifications, display over other apps, battery, accessibility (optional), storage (Android 8-9)
+-- [x] Public Download/MDM export, open, share (`Files.kt`)
+-- [x] Icon (own vector design, adaptive) and notification icon
+-- [x] Four processors (`build-rust.sh`, `build.gradle.kts` splits, workflow), 300 MB check in CI
+-- [x] Rust crate: `cargo check` and `cargo test` pass on the host (3 tests)
+-- [x] Static checks: every `R.string` / drawable / xml reference exists, English and Arabic strings
+-      have the same keys and placeholders, all XML is well-formed, brackets balance in every .kt file
+-
+-Not verified (be honest about this when reporting): the Gradle build, the Rust build for the four
+-Android targets (especially `i686-linux-android`), the APK sizes, anything on a device.
++## State (2026-11-13, second pass: ADM-style update)
++
++The owner's second request (informal Arabic, summarised): make it look like **ADM** (Advanced
++Download Manager) instead of FDM; the app must analyse ANY link (also sites yt-dlp has no
++extractor for) with a fast Rust analyser; an optional floating window/button above all apps; every
++permission; files saved automatically; fix the old app's errors (`yt-dlp failed`, a cryptic "mf2");
++and leave a file another AI can continue from (this one).
++
++Done in the code, **Rust verified on the host, Kotlin NOT compiled, nothing run on a phone**:
++
++- [x] **Rust page analyzer** `crates/android/src/analyze.rs`, JNI method `analyze {url, headers?}`:
++      reads a page's source (og:video, `<video>`/`<source>`, JSON-LD, escaped URLs in scripts, one
++      level of `<iframe>`), returns candidates best first (`file`, `hls`, `dash`, `page`). 5 unit
++      tests pass (`cargo test --ignore-rust-version` in `crates/android`, 8 tests total).
++- [x] **VideoEngine.kt** replaces VideoResolver.kt. yt-dlp now downloads AND merges (best video +
++      best audio, ffmpeg in the APK) itself instead of "find one address, hand it to our engine"
++      (that single-file request caused "Requested format is not available"). Failure ladder:
++      default → update yt-dlp → other YouTube clients → single file → Rust analyzer (a file goes to
++      the HTTP engine, an HLS/DASH/embedded player goes back to yt-dlp). `explain()` turns yt-dlp's
++      text into a plain sentence (English / Arabic); the raw text is kept in `Item.detail` and shown
++      under **Details** (copyable) with a **Retry** button.
++- [x] ADM-style UI (`Screens.kt`, `Theme.kt`): side drawer with categories (videos, music,
++      documents, apps, archives, images, other, with counts), tabs Downloading / Completed, dark by
++      default, paste button and "analyze this page" / "sound only (MP3)" options in the add dialog.
++- [x] Optional **floating button** above every app (`BubbleService.kt`, `ClipActivity.kt`; Settings →
++      Floating button): tap = read the clipboard link, analyse, add. Off by default.
++- [x] Optional **deep detection** (Settings): the accessibility watcher also analyses ANY page it
++      sees in a browser's address bar and shows the "video found" window. Off by default.
++- [x] A copied link is offered when the app comes to the front (`MainActivity.onWindowFocusChanged`);
++      shared text like "Title https://…" is reduced to its link (`firstLink`).
++- [x] Files are saved automatically: app folder while downloading, then exported to
++      Download/MDM (MediaStore, no permission on Android 10+). Install-apk permission added.
++- [x] Static checks: every `R.string` exists, English and Arabic keys equal, XML well-formed.
++
++Not verified (say so honestly): the Gradle build, the Rust build for the four Android targets,
++APK sizes, anything on a device, and **YouTube**: since late 2025 yt-dlp needs an external
++JavaScript runtime for YouTube and youtubedl-android bundles only Python, so YouTube depends on the
++"other clients" step working. If it fails, the next idea is to solve the challenge with the phone's
++WebView (or to bundle a small JS runtime).
+ 
+ ## Next (in this order)
+ 
+-1. **Run the workflow** (Actions → "Android APK" → Run workflow) or build locally
+-   (`tools/android/build-rust.sh`, then `gradle -p android assembleRelease`). Fix compile errors
+-   until it is green. Check the printed APK sizes against 300 MB (the universal APK is the one at risk;
+-   if it is over, drop `isUniversalApk` and publish the four split APKs).
+-2. On a phone: first start (permissions screen), add a link, pause/resume, a finished file appears
+-   in Download/MDM and opens, Arabic layout (right to left), dark mode.
+-3. Test the video flow: a YouTube link shared to the app; the in-app browser on a page with a
+-   video; then with the accessibility service on, Chrome and Firefox: does the floating window
+-   appear? If a browser shows only the domain in its address bar, `URL_BARS` or the approach needs
+-   changing for that browser.
+-4. Then, by value: editable speed limits ("Change traffic limits" in FDM), forwarding yt-dlp's
+-   request headers to the engine, a details screen per download, Wi-Fi-only option, scheduler,
+-   more languages (`i18n/*.tsv` → Android string resources), and torrents again.
++1. **Build**: push, run the workflow (Actions → "Android APK") or `tools/android/build-rust.sh`
++   then `gradle -p android assembleRelease`. Fix compile errors (likeliest: Compose imports,
++   the youtubedl-android callback signature in `VideoEngine.ytdlp`, `addOption` for repeated flags).
++2. On a phone: permissions screen, add a direct link, a YouTube link, a link of a small site with an
++   embedded player (the analyzer), audio-only, pause/resume a video, a failed link → Details → Retry.
++3. The owner's old errors: ask for the exact text of "mf2" (never found in this repository; the
++   Details dialog now copies yt-dlp's raw output, which is what we need).
++4. Then: editable speed limits, per-download details screen, Wi-Fi-only, scheduler, HLS download in
++   the Rust engine (so streams get multi-connection speed), more languages, torrents.
+ 
+ ## Rules of this repository that still apply (CLAUDE.md)
+ 
+diff --git a/docs/android-reference.md b/docs/android-reference.md
+index 46b5de1..9ccc5d1 100644
+--- a/docs/android-reference.md
++++ b/docs/android-reference.md
+@@ -24,7 +24,8 @@ the `torrent_*` calls in the first version of `Downloads.kt`.
+ | `Item.kt` | One list row (`Item`), its `Kind` (HTTP, VIDEO), `Status`, `FileType`, JSON save/load |
+ | `Downloads.kt` | The list, the queue (`schedule()`: at most `Prefs.maxSimultaneous()` run, oldest waiting first), the speed limit shared between running downloads (`applyLimits()`), polling the Rust library every 500 ms, saving `downloads.json`, exporting a finished file |
+ | `Native.kt` | The one JNI function: `Native.invoke(method, json)`. Methods are listed in `crates/android/src/lib.rs` |
+-| `VideoResolver.kt` | yt-dlp (youtubedl-android) turns a video page into a direct stream address; the engine downloads it |
++| `VideoEngine.kt` | Video pages: yt-dlp downloads and merges itself, with a failure ladder ending in the Rust analyzer; `explain()` turns errors into plain sentences |
++| `BubbleService.kt`, `ClipActivity.kt` | Optional floating button above every app; tap reads the clipboard link and adds it |
+ | `VideoDetector.kt` | Is this link a direct media file or a video page of a known site? One list of site patterns, used everywhere |
+ | `Overlay.kt` | The floating "Video found: Download" window over other apps (plain views, draggable, hides after 15 s) |
+ | `LinkWatcherService.kt` | OPTIONAL accessibility service: reads only the address bar of listed browsers and calls `Overlay.show` for video links. Address-bar ids are in `URL_BARS` |
+@@ -87,6 +88,8 @@ watched), `res/xml/file_paths.xml` (FileProvider), `res/drawable/ic_launcher_*.x
+ 
+ ## Change log
+ 
++- **2026-11-13 (second pass)**: ADM-style UI (drawer with categories, Downloading/Completed tabs, dark by default); `VideoEngine` replaces `VideoResolver` (yt-dlp downloads and merges, five-step failure ladder, explained errors, Details + Retry); Rust page analyzer `analyze` (`crates/android/src/analyze.rs`, tested on the host); optional floating button and deep detection; clipboard link offered on focus; MissingTranslation lint off. Kotlin not compiled.
++
+ - **2026-11-13**: FDM-style UI (tabs, search, speed chip, type icons, dark mode); queue and speed
+   modes; settings; built-in browser with media sniffing; floating "video found" window (optional,
+   with the optional accessibility address-bar watcher); permissions screen; public Download/MDM
