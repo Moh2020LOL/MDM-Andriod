@@ -23,5 +23,13 @@ object Native {
             JSONObject().put("error", e.message ?: e.javaClass.simpleName)
         }
 
-    fun JSONObject.error(): String? = if (has("error")) optString("error") else null
+    /**
+     * The failure text, or null when there is none. The library puts `"error": null` into every
+     * snapshot: a key that is present is NOT an error, and org.json's optString turns a JSON null
+     * into the text "null" (that was every download failing with "null").
+     */
+    fun JSONObject.error(): String? = if (has("error") && !isNull("error")) optString("error").ifEmpty { null } else null
+
+    /** A text field that may be a JSON null: "" then (never the word "null"). */
+    fun JSONObject.text(key: String): String = if (isNull(key)) "" else optString(key)
 }

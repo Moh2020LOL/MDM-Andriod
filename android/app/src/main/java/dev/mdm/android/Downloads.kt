@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Environment
 import android.webkit.CookieManager
 import dev.mdm.android.Native.error
+import dev.mdm.android.Native.text
 import java.io.File
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
@@ -310,8 +311,8 @@ object Downloads {
                 done = s.optLong("downloaded"),
                 total = s.optLong("size", it.total),
                 speed = s.optLong("speed"),
-                file = s.optString("file").ifEmpty { it.file },
-                stateFile = s.optString("state_file").ifEmpty { it.stateFile },
+                file = s.text("file").ifEmpty { it.file },
+                stateFile = s.text("state_file").ifEmpty { it.stateFile },
             )
         }
         when (s.optString("state")) {
@@ -328,7 +329,7 @@ object Downloads {
             }
             "Failed" -> {
                 Native.invoke("http_finish", JSONObject().put("id", item.engineId))
-                fail(item.key, s.optString("error").ifEmpty { "failed" })
+                fail(item.key, s.text("error").ifEmpty { "The download failed (no reason given by the engine)" })
             }
         }
     }
