@@ -134,4 +134,12 @@
     <string name="bubble_notification">زر التحميل العائم شغّال</string>
     <string name="clip_no_link">ما في رابط في الحافظة. انسخ رابط أولاً.</string>
     <string name="clipboard_link">رابط في الحافظة</string>
+
+    <!-- Quality list -->
+    <string name="quality_title">اختر الجودة</string>
+    <string name="quality_loading">جاري البحث عن الجودات المتاحة…</string>
+    <string name="quality_best">جرّب أفضل جودة متاحة (تلقائي)</string>
+    <string name="quality_sec_both">فيديو (صورة + صوت)</string>
+    <string name="quality_sec_video_only">صورة فقط (بينضاف أفضل صوت)</string>
+    <string name="quality_sec_audio">صوت فقط</string>
 </resources>

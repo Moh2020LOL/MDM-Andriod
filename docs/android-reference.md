@@ -88,6 +88,8 @@ watched), `res/xml/file_paths.xml` (FileProvider), `res/drawable/ic_launcher_*.x
 
 ## Change log
 
+- **2026-11-14**: quality list for video pages (`VideoEngine.listFormats`, `QualityDialog`, `Item.selector`); overlay and floating button open the app so the list shows. Not compiled.
+
 - **2026-11-13 (second pass)**: ADM-style UI (drawer with categories, Downloading/Completed tabs, dark by default); `VideoEngine` replaces `VideoResolver` (yt-dlp downloads and merges, five-step failure ladder, explained errors, Details + Retry); Rust page analyzer `analyze` (`crates/android/src/analyze.rs`, tested on the host); optional floating button and deep detection; clipboard link offered on focus; MissingTranslation lint off. Kotlin not compiled.
 
 - **2026-11-13**: FDM-style UI (tabs, search, speed chip, type icons, dark mode); queue and speed

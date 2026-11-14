@@ -134,4 +134,12 @@
     <string name="bubble_notification">Floating download button is on</string>
     <string name="clip_no_link">No link in the clipboard. Copy a link first.</string>
     <string name="clipboard_link">Link in clipboard</string>
+
+    <!-- Quality list -->
+    <string name="quality_title">Choose quality</string>
+    <string name="quality_loading">Looking up the available qualities…</string>
+    <string name="quality_best">Try best available (automatic)</string>
+    <string name="quality_sec_both">VIDEO (picture + sound)</string>
+    <string name="quality_sec_video_only">VIDEO ONLY (the best sound is added)</string>
+    <string name="quality_sec_audio">AUDIO ONLY</string>
 </resources>

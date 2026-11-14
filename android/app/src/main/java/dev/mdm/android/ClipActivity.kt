@@ -29,8 +29,19 @@ class ClipActivity : Activity() {
             Toast.makeText(this, R.string.clip_no_link, Toast.LENGTH_LONG).show()
         } else {
             val page = VideoDetector.videoPage(link) || VideoDetector.looksLikePage(link)
-            Downloads.add(link, video = page)
-            Toast.makeText(this, R.string.overlay_added, Toast.LENGTH_SHORT).show()
+            if (page) {
+                // A page: the app opens with it so the quality list shows.
+                startActivity(
+                    android.content.Intent(this, MainActivity::class.java)
+                        .setAction(android.content.Intent.ACTION_SEND)
+                        .setType("text/plain")
+                        .putExtra(android.content.Intent.EXTRA_TEXT, link)
+                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            } else {
+                Downloads.add(link)
+                Toast.makeText(this, R.string.overlay_added, Toast.LENGTH_SHORT).show()
+            }
         }
         finish()
     }

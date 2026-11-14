@@ -106,9 +106,20 @@ object Overlay {
             }
             setPadding(dp(app, 14), dp(app, 6), dp(app, 14), dp(app, 6))
             setOnClickListener {
-                Downloads.add(url, video = video, referer = referer)
-                Toast.makeText(app, R.string.overlay_added, Toast.LENGTH_SHORT).show()
                 dismissNow()
+                if (video) {
+                    // A page: the app opens with the link so the person picks the quality.
+                    app.startActivity(
+                        android.content.Intent(app, MainActivity::class.java)
+                            .setAction(android.content.Intent.ACTION_SEND)
+                            .setType("text/plain")
+                            .putExtra(android.content.Intent.EXTRA_TEXT, url)
+                            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                    )
+                } else {
+                    Downloads.add(url, video = false, referer = referer)
+                    Toast.makeText(app, R.string.overlay_added, Toast.LENGTH_SHORT).show()
+                }
             }
         }
         row.addView(download)

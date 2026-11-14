@@ -56,6 +56,9 @@ object VideoEngine {
         synchronized(this) {
             if (ready) return
             YoutubeDL.getInstance().init(context.applicationContext)
+            // ffmpeg (joins picture and sound, converts to MP3) is a separate module that must be
+            // unpacked too; without this yt-dlp finds no ffmpeg and a merged download fails.
+            runCatching { com.yausername.ffmpeg.FFmpeg.getInstance().init(context.applicationContext) }
             ready = true
         }
         val app = context.applicationContext
@@ -78,6 +81,101 @@ object VideoEngine {
         updateDone.await(120, TimeUnit.SECONDS)
     }
 
+    /** One line of the quality list. [selector] is yt-dlp's `-f`; null with [audioOnly] false = automatic best. */
+    data class Quality(val label: String, val selector: String?, val audioOnly: Boolean = false, val group: Int = 1)
+    // group: 0 automatic, 1 picture + sound together, 2 picture only (sound is added), 3 sound only
+
+    class Listing(val title: String?, val qualities: List<Quality>)
+
+    /**
+     * Every quality the page offers (yt-dlp `-J`): one line per resolution with its size, plus
+     * sound only. Walks the same ladder as a download (default, update, other clients). Throws
+     * with yt-dlp's text when nothing could be read: the screen then still offers "best available",
+     * whose download has the analyzer as its last resort. Blocks: never on the main thread.
+     */
+    fun listFormats(context: Context, page: String): Listing {
+        val app = context.applicationContext
+        ensureReady(app)
+        val log = StringBuilder()
+        fun info(extra: List<String>): JSONObject? = try {
+            val req = YoutubeDLRequest(page).apply {
+                addOption("--dump-single-json")
+                addOption("--no-playlist")
+                addOption("--no-warnings")
+                addOption("--socket-timeout", "30")
+                var i = 0
+                while (i + 1 < extra.size) {
+                    addOption(extra[i], extra[i + 1])
+                    i += 2
+                }
+            }
+            val out = YoutubeDL.getInstance().execute(req, null, null).out
+            val start = out.indexOf('{')
+            if (start < 0) null else JSONObject(out.substring(start))
+        } catch (e: Exception) {
+            log.append(e.message.orEmpty().takeLast(1500)).append("\n\n")
+            null
+        }
+        val json = info(emptyList())
+            ?: run { waitForUpdate(app); info(emptyList()) }
+            ?: info(listOf("--extractor-args", "youtube:player_client=tv,android_vr,web_safari"))
+            ?: throw IllegalStateException(log.toString().trim().ifEmpty { "yt-dlp gave no answer for this page" })
+
+        val formats = json.optJSONArray("formats")
+        class Row(val q: Quality, val height: Int, val rate: Double)
+        val both = ArrayList<Row>()
+        val videoOnly = ArrayList<Row>()
+        val sound = ArrayList<Row>()
+        if (formats != null) {
+            for (i in 0 until formats.length()) {
+                val f = formats.getJSONObject(i)
+                val id = f.text("format_id")
+                if (id.isEmpty()) continue
+                val ext = f.text("ext")
+                // Storyboards (thumbnail sheets) are not media.
+                if (ext == "mhtml" || f.text("format_note").contains("storyboard", ignoreCase = true)) continue
+                val vc = f.text("vcodec")
+                val ac = f.text("acodec")
+                val hasV = vc.isNotEmpty() && vc != "none"
+                val hasA = ac.isNotEmpty() && ac != "none"
+                if (!hasV && !hasA) continue
+                val size = maxOf(f.optLong("filesize", 0), f.optLong("filesize_approx", 0))
+                val height = f.optInt("height", 0)
+                val fps = f.optInt("fps", 0)
+                val tbr = f.optDouble("tbr", 0.0).let { if (it.isNaN()) 0.0 else it }
+                val abr = f.optDouble("abr", 0.0).let { if (it.isNaN()) 0.0 else it }
+                val sz = if (size > 0) " · ~" + formatBytes(size) else ""
+                val rate = if (hasV) tbr else if (abr > 0) abr else tbr
+                val kbps = if (rate > 0) " · ${rate.toInt()} kbps" else ""
+                val res = if (height > 0) "${height}p" + (if (fps > 30) fps.toString() else "")
+                else f.text("resolution").ifEmpty { "video" }
+                val vShort = vc.substringBefore('.')
+                val aShort = ac.substringBefore('.')
+                when {
+                    hasV && hasA ->
+                        both += Row(Quality("$res · $ext · $vShort/$aShort$kbps$sz", id, group = 1), height, rate)
+                    hasV ->
+                        videoOnly += Row(
+                            Quality("$res · $ext · $vShort$kbps$sz" + (if (ar()) " · + صوت" else " · + sound"), "$id+ba/$id", group = 2),
+                            height, rate,
+                        )
+                    else ->
+                        sound += Row(Quality("$ext · $aShort$kbps$sz", id, group = 3), 0, rate)
+                }
+            }
+        }
+        val byQuality = Comparator<Row> { x, y ->
+            if (x.height != y.height) y.height.compareTo(x.height) else y.rate.compareTo(x.rate)
+        }
+        val list = ArrayList<Quality>()
+        list += Quality(if (ar()) "أفضل جودة (تلقائي)" else "Best available (automatic)", null, group = 0)
+        list += both.sortedWith(byQuality).take(30).map { it.q }
+        list += videoOnly.sortedWith(byQuality).take(30).map { it.q }
+        list += Quality(if (ar()) "تحويل إلى MP3" else "Convert to MP3", null, audioOnly = true, group = 3)
+        list += sound.sortedByDescending { it.rate }.take(15).map { it.q }
+        return Listing(json.text("title").ifEmpty { null }, list)
+    }
+
     /** Stops a running download (pause or remove); yt-dlp continues from its .part file next time. */
     fun stop(key: String) {
         stopped += key
@@ -92,6 +190,7 @@ object VideoEngine {
         dir: File,
         audio: Boolean,
         referer: String?,
+        selector: String?,
         onProgress: (Progress) -> Unit,
     ): Outcome {
         val app = context.applicationContext
@@ -104,7 +203,7 @@ object VideoEngine {
         fun attempt(label: String, extra: List<String>, url: String = page, headers: Map<String, String> = emptyMap()): File? {
             if (key in stopped) return null
             return try {
-                ytdlp(key, url, dir, audio, extra, headers.ifEmpty { referer?.let { mapOf("Referer" to it) } ?: emptyMap() }, onProgress)
+                ytdlp(key, url, dir, audio, selector, extra, headers.ifEmpty { referer?.let { mapOf("Referer" to it) } ?: emptyMap() }, onProgress)
             } catch (e: Exception) {
                 if (key in stopped) return null
                 log.append("[$label] ").append(e.message.orEmpty().takeLast(1500)).append("\n\n")
@@ -167,6 +266,7 @@ object VideoEngine {
         url: String,
         dir: File,
         audio: Boolean,
+        selector: String?,
         extra: List<String>,
         headers: Map<String, String>,
         onProgress: (Progress) -> Unit,
@@ -188,8 +288,8 @@ object VideoEngine {
                 addOption("--audio-format", "mp3")
                 addOption("--audio-quality", "0")
             } else {
-                addOption("-f", "bv*[height<=?1080]+ba/b[height<=?1080]/b")
-                addOption("--merge-output-format", "mp4")
+                addOption("-f", selector ?: "bv*[height<=?1080]+ba/b[height<=?1080]/b")
+                addOption("--merge-output-format", "mp4/mkv")
             }
             headers.forEach { (k, v) -> addOption("--add-header", "$k:$v") }
             var i = 0

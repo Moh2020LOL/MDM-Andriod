@@ -52,6 +52,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.ModalDrawerSheet
@@ -83,6 +84,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -100,7 +102,9 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 // ======================================================================================
 // The list, laid out like a phone download manager: a side drawer with the categories (videos,
@@ -119,6 +123,8 @@ fun DownloadsScreen(onBrowser: () -> Unit, onSettings: () -> Unit, prefill: Stri
     var query by remember { mutableStateOf("") }
     var speedOpen by remember { mutableStateOf(false) }
     var adding by remember { mutableStateOf(false) }
+    // The video page whose qualities are being chosen.
+    var pickFor by remember { mutableStateOf<String?>(null) }
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
 
@@ -247,10 +253,97 @@ fun DownloadsScreen(onBrowser: () -> Unit, onSettings: () -> Unit, prefill: Stri
         AddDialog(
             initial = prefill.orEmpty(),
             onDismiss = { adding = false; onPrefillHandled() },
-            onAdd = { text, video, audio -> Downloads.add(text, video, audio = audio); adding = false; onPrefillHandled() },
+            onAdd = { text, video, audio ->
+                if (video && !audio) {
+                    pickFor = text
+                } else {
+                    Downloads.add(text, video, audio = audio)
+                }
+                adding = false
+                onPrefillHandled()
+            },
         )
     }
+    pickFor?.let { link -> QualityDialog(link) { pickFor = null } }
     if (speedOpen) SpeedDialog(onDismiss = { speedOpen = false })
+}
+
+private sealed class QualityState {
+    object Loading : QualityState()
+    class Ready(val listing: VideoEngine.Listing) : QualityState()
+    class Failed(val short: String, val detail: String) : QualityState()
+}
+
+/** Lists every quality the page offers (yt-dlp), the person taps one and the download starts with it. */
+@Composable
+private fun QualityDialog(link: String, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    var state by remember { mutableStateOf<QualityState>(QualityState.Loading) }
+    LaunchedEffect(link) {
+        state = withContext(Dispatchers.IO) {
+            try {
+                QualityState.Ready(VideoEngine.listFormats(context, link))
+            } catch (e: Exception) {
+                val raw = e.message.orEmpty()
+                QualityState.Failed(VideoEngine.explain(raw), raw)
+            }
+        }
+    }
+    fun start(q: VideoEngine.Quality?) {
+        Downloads.add(link, video = true, audio = q?.audioOnly == true, selector = q?.selector)
+        Toast.makeText(context, R.string.overlay_added, Toast.LENGTH_SHORT).show()
+        onDismiss()
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.quality_title)) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                when (val s = state) {
+                    is QualityState.Loading -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
+                        Text(stringResource(R.string.quality_loading), fontSize = 14.sp)
+                    }
+                    is QualityState.Ready -> {
+                        s.listing.title?.let { Text(it, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                        var lastGroup = -1
+                        s.listing.qualities.forEach { q ->
+                            if (q.group != lastGroup && q.group != 0) {
+                                Text(
+                                    stringResource(
+                                        when (q.group) {
+                                            1 -> R.string.quality_sec_both
+                                            2 -> R.string.quality_sec_video_only
+                                            else -> R.string.quality_sec_audio
+                                        },
+                                    ),
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp,
+                                    modifier = Modifier.padding(top = 10.dp, bottom = 2.dp),
+                                )
+                            }
+                            lastGroup = q.group
+                            TextButton(onClick = { start(q) }, modifier = Modifier.fillMaxWidth()) {
+                                Text(q.label, modifier = Modifier.fillMaxWidth(), fontSize = 14.sp)
+                            }
+                        }
+                    }
+                    is QualityState.Failed -> {
+                        Text(s.short, color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
+                        SelectionContainer {
+                            Text(s.detail, fontSize = 10.sp, maxLines = 12, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        TextButton(onClick = { start(null) }, modifier = Modifier.fillMaxWidth()) {
+                            Text(stringResource(R.string.quality_best), modifier = Modifier.fillMaxWidth())
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
+    )
 }
 
 @Composable

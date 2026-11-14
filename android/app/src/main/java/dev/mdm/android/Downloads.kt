@@ -72,14 +72,14 @@ object Downloads {
      * What the person typed, pasted, shared or caught in the browser. [video]: a web page for yt-dlp.
      * [referer]: the page a browser download came from.
      */
-    fun add(text: String, video: Boolean = false, referer: String? = null, audio: Boolean = false) {
+    fun add(text: String, video: Boolean = false, referer: String? = null, audio: Boolean = false, selector: String? = null) {
         val t = text.trim()
         if (t.isEmpty()) return
         scope.launch {
             val key = UUID.randomUUID().toString()
             val dir = saveDir.absolutePath
             val item = if (video) {
-                Item(key, Kind.VIDEO, t, page = t, dir = dir, title = t, referer = referer, audio = audio)
+                Item(key, Kind.VIDEO, t, page = t, dir = dir, title = t, referer = referer, audio = audio, selector = selector)
             } else {
                 Item(
                     key, Kind.HTTP, t, dir = dir, referer = referer,
@@ -160,9 +160,31 @@ object Downloads {
      */
     private fun beginVideo(item: Item) {
         var lastUi = 0L
+        val gotProgress = java.util.concurrent.atomic.AtomicBoolean(false)
+        val startedAt = System.currentTimeMillis()
+        // yt-dlp's own progress lines are the main source. When none arrive (a protocol that prints
+        // none, a format of unknown size), the growth of its .part files says it still works, so the
+        // row never sits at "0 B" while the download goes on.
+        val watcher = scope.launch {
+            var last = 0L
+            var lastAt = startedAt
+            while (isActive) {
+                delay(1000)
+                if (gotProgress.get() || !stillRunning(item.key)) continue
+                val size = File(item.dir).listFiles()
+                    ?.filter { it.isFile && it.lastModified() >= startedAt - 2000 && it.name.contains(".part") }
+                    ?.sumOf { it.length() } ?: 0L
+                val now = System.currentTimeMillis()
+                val speed = if (size > last && now > lastAt) (size - last) * 1000 / (now - lastAt) else 0L
+                last = size
+                lastAt = now
+                if (size > 0) change(item.key) { it.copy(done = size, speed = speed) }
+            }
+        }
         val outcome = VideoEngine.run(
-            app, item.key, item.page ?: item.source, File(item.dir), item.audio, item.referer,
+            app, item.key, item.page ?: item.source, File(item.dir), item.audio, item.referer, item.selector,
         ) { p ->
+            gotProgress.set(true)
             val now = System.currentTimeMillis()
             if (now - lastUi < 400 || !stillRunning(item.key)) return@run
             lastUi = now
@@ -175,6 +197,7 @@ object Downloads {
                 )
             }
         }
+        watcher.cancel()
         when (outcome) {
             is VideoEngine.Outcome.Stopped -> Unit // paused or removed: pause()/remove() did the rest
             is VideoEngine.Outcome.Failed -> if (stillRunning(item.key)) fail(item.key, outcome.short, outcome.detail)

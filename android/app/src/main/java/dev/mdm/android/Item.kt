@@ -41,6 +41,8 @@ data class Item(
     val detail: String? = null,
     /** A video page downloaded as sound only (MP3). */
     val audio: Boolean = false,
+    /** yt-dlp's format selector the person chose in the quality list (null: best, automatic). */
+    val selector: String? = null,
 ) {
     val fraction: Float get() = if (total > 0) (done.toFloat() / total).coerceIn(0f, 1f) else 0f
 
@@ -54,7 +56,7 @@ data class Item(
         .put("dir", dir).put("title", title).put("status", status.name)
         .put("done", done).put("total", total)
         .put("stateFile", stateFile).put("file", file).put("uri", uri).put("referer", referer)
-        .put("added", added).put("error", error).put("detail", detail).put("audio", audio)
+        .put("added", added).put("error", error).put("detail", detail).put("audio", audio).put("selector", selector)
 
     companion object {
         fun fromJson(o: JSONObject): Item = Item(
@@ -76,6 +78,7 @@ data class Item(
             error = o.optString("error").ifEmpty { null },
             detail = o.optString("detail").ifEmpty { null },
             audio = o.optBoolean("audio", false),
+            selector = o.optString("selector").ifEmpty { null },
         )
 
         fun listFromJson(text: String): List<Item> {

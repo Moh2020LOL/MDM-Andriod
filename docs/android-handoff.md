@@ -53,6 +53,7 @@ Done in the code, **Rust verified on the host, Kotlin NOT compiled, nothing run 
       shared text like "Title https://…" is reduced to its link (`firstLink`).
 - [x] Files are saved automatically: app folder while downloading, then exported to
       Download/MDM (MediaStore, no permission on Android 10+). Install-apk permission added.
+- [x] **Quality list**: after "Download" on a video page, `QualityDialog` (Screens.kt) asks `VideoEngine.listFormats` (yt-dlp `-J`, same failure ladder) and shows one line per resolution with its size, plus sound only (MP3); the choice is stored as `Item.selector` (yt-dlp `-f`). If listing fails the dialog shows the reason and a "best available" button (its download still has the analyzer as last resort). The floating window and the floating button open the app with the link so the list shows.
 - [x] Static checks: every `R.string` exists, English and Arabic keys equal, XML well-formed.
 
 Not verified (say so honestly): the Gradle build, the Rust build for the four Android targets,
